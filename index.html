@@ -856,7 +856,7 @@ function endMatch(){
   const leveled=addXp(xp);
   const ps=Math.round(G.player.score);
   if(ps>save.bestScore) save.bestScore=ps;
-  save.history.unshift({win, score:ps, kos:G.player.kos, coins, mode:ZONE_MODES[G.mode].label});
+  save.history.unshift({win:won, score:ps, kos:G.player.kos, coins, mode:ZONE_MODES[G.mode].label});
   save.history=save.history.slice(0,10);
   const earned=checkAchievements(); saveSave();
 
@@ -1338,7 +1338,7 @@ function onEnd(m){
   stopNetInput();
   document.getElementById("specBanner").style.display="none";
   const me=m.results.find(r=>r.id===myId);
-  if(me){
+  if(me){ try{
     const won=me.place===1 && me.score>0;
     const coinMult=statVal("coinMult");
     let coins=Math.round((won?75:25)*coinMult)+me.kos*Math.round(15*coinMult);
@@ -1349,7 +1349,7 @@ function onEnd(m){
     save.kos+=me.kos;
     const leveled=addXp(xp);
     if(me.score>save.bestScore) save.bestScore=me.score;
-    save.history.unshift({win, score:me.score, kos:me.kos, coins, mode:(G?ZONE_MODES[G.mode].label:"Online")+" (online)"});
+    save.history.unshift({win:won, score:me.score, kos:me.kos, coins, mode:(G?ZONE_MODES[G.mode].label:"Online")+" (online)"});
     save.history=save.history.slice(0,10);
     const earned=checkAchievements(); saveSave();
     document.getElementById("resultTitle").textContent=won?"VICTORY":"DEFEAT";
@@ -1363,7 +1363,7 @@ function onEnd(m){
     document.getElementById("levelUp").style.display=leveled?"block":"none";
     (won?SFX.win:SFX.lose)();
     if(earned.length) setTimeout(()=>toast("🏆 "+earned.join(", ")),600);
-  }
+  }catch(e){ console.error("onEnd reward error:",e); } }   // never let rewards block the results screen
   // full standings + winner for everyone (independent of your own result)
   const rows=m.results.map(r=>({place:r.place,name:r.name,color:r.color,score:r.score,kos:r.kos,eliminated:r.eliminated,me:r.id===myId}));
   renderStandings(rows); announceWinner(rows);
