@@ -248,6 +248,7 @@ body{
           <div class="bar" style="width:120px;"><div id="hudDash" style="background:linear-gradient(90deg,#00e5ff,#7c5cff);width:100%;"></div></div></div>
       </div>
       <button id="leaveGameBtn" class="btn small secondary" style="position:absolute;bottom:18px;left:18px;pointer-events:auto;" onclick="quitToMenu()">⏏ Leave</button>
+      <div id="countdown" style="position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-size:120px;font-weight:900;color:var(--accent);text-shadow:0 0 44px rgba(0,229,255,.6);display:none;pointer-events:none;"></div>
       <div id="specBanner" style="position:absolute;top:40%;left:50%;transform:translateX(-50%);text-align:center;display:none;">
         <div style="font-size:32px;font-weight:900;color:var(--bad);text-shadow:0 0 20px rgba(255,82,82,.5);">💀 ELIMINATED</div>
         <div class="small-muted">Spectating — your friends are still playing</div>
@@ -816,7 +817,8 @@ function startMatch(){
       zone:{x:cx,y:cy,r:90,baseR:90,timer:12,maxTimer:12}, coinsEarned:0,
       arena:equippedCos("arena").value, puTimer:6, diff:botDifficulty() };
   G.obstacles=genObstacles();
-  G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0;
+  G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0; G.countdown=3;
+  _cdPrev=-1; document.getElementById("countdown").style.display="none";
 
   const player=new Entity(cx, cy+150, equippedCos("character").value, "You", true);
   G.entities.push(player); G.player=player;
@@ -882,6 +884,8 @@ function ordinal(n){ return n+(["th","st","nd","rd"][(n%100>10&&n%100<14)||n%10>
 /* ---- per-frame update ---- */
 function update(dt){
   if(!G||G.over) return;
+  // pre-game countdown: freeze the sim, just show the arena + positions
+  if(G.countdown>0){ G.countdown-=dt; updateCountdownUI(G.countdown>0?Math.ceil(G.countdown):0); return; }
   G.time-=dt; if(G.time<=0){ G.time=0; endMatch(); return; }
 
   // zone timer + mode behavior
@@ -1181,6 +1185,15 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+// Pre-game 3-2-1-GO! overlay (driven by server countdown online, or G.countdown locally).
+let _cdPrev=-1;
+function updateCountdownUI(cd){
+  const el=document.getElementById("countdown");
+  if(cd>0){ el.style.display="block"; el.style.color="var(--accent)"; el.textContent=cd; if(cd!==_cdPrev) beep(440,0.12,"square",0.06); }
+  else if(_cdPrev>0){ el.style.display="block"; el.style.color="var(--good)"; el.textContent="GO!"; beep(680,0.22,"sine",0.07); setTimeout(()=>{el.style.display="none";},650); }
+  _cdPrev=cd;
+}
+
 // Big "+N" popup over the local player while they're racking up zone points.
 function updateScorePop(dt){
   if(!G) return;
@@ -1243,6 +1256,7 @@ function setColor(c){ localStorage.setItem("rr_color",c); send({t:"setcolor", co
 // Always-available exit so you're never trapped on the game screen.
 function quitToMenu(){
   document.getElementById("specBanner").style.display="none";
+  document.getElementById("countdown").style.display="none";
   if(online){ leaveRoom(); }
   else { G=null; show("menuScreen"); renderMenu(); }
 }
@@ -1341,6 +1355,7 @@ function setupOnlineGame(m){
       entities:[], projectiles:[], particles:[], floats:[], powerups:[], coinsEarned:0, player:null };
   prevEntById={}; playerTrail=[];
   G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0;
+  _cdPrev=-1; document.getElementById("countdown").style.display="none";
   document.getElementById("specBanner").style.display="none";
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[m.mode].label+" · ONLINE";
   show("gameScreen"); startNetInput();
@@ -1371,6 +1386,7 @@ function onState(m){
     color:p.ownerId===myId?equippedCos("projectile").value:p.color }));
   G.powerups=m.powerups.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r, type:p.type, life:p.life }));
   if(G.player) G.coinsEarned=Math.round(G.player.kos*15*statVal("coinMult"));
+  updateCountdownUI(m.countdown||0);
   // spectator mode: out of lives but the match keeps playing for everyone else
   document.getElementById("specBanner").style.display=(G.player&&G.player.eliminated)?"block":"none";
   updateHUD();
@@ -1379,6 +1395,7 @@ function onState(m){
 function onEnd(m){
   stopNetInput();
   document.getElementById("specBanner").style.display="none";
+  document.getElementById("countdown").style.display="none";
   const me=m.results.find(r=>r.id===myId);
   if(me){ try{
     const won=me.place===1 && me.score>0;

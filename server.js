@@ -110,7 +110,7 @@ function startGame(room) {
   const g = {
     mode, obstacles: genObstacles(), entities: [], projectiles: [], powerups: [],
     zone: { x: 0, y: 0, r: 90, baseR: 90, timer: 12, maxTimer: 12 },
-    time: MATCH_TIME, puTimer: 6, over: false,
+    time: MATCH_TIME, puTimer: 6, over: false, countdown: 3,   // 3s pre-game: positions shown, sim frozen
   };
   // humans
   let i = 0;
@@ -213,6 +213,8 @@ function tick(room) {
 function tickInner(room) {
   const g = room.game; if (!g || g.over) return;
   const dt = TICK;
+  // pre-game countdown: hold the sim, keep broadcasting positions so players see the map
+  if (g.countdown > 0) { g.countdown -= dt; broadcastState(room, g.countdown); return; }
   g.time -= dt;
   if (g.time <= 0) { g.time = 0; return endGame(room); }
 
@@ -298,9 +300,12 @@ function tickInner(room) {
   // last player standing wins (only when the match started with 2+ entities)
   if (g.startCount >= 2 && g.entities.filter(e => !e.eliminated).length <= 1) return endGame(room);
 
-  // broadcast state
+  broadcastState(room, 0);
+}
+function broadcastState(room, countdown) {
+  const g = room.game; if (!g) return;
   broadcast(room, {
-    t: "state", time: g.time, mode: g.mode, over: false,
+    t: "state", time: g.time, mode: g.mode, over: false, countdown: Math.ceil(countdown || 0),
     zone: { x: g.zone.x, y: g.zone.y, r: g.zone.r },
     entities: g.entities.map(e => ({ id: e.id, name: e.name, color: e.color, x: e.x, y: e.y, r: e.r, angle: e.angle, hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, lives: e.lives, eliminated: e.eliminated, buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd })),
     projectiles: g.projectiles.map(p => ({ x: p.x, y: p.y, r: p.r, ownerId: p.ownerId, color: p.color })),
