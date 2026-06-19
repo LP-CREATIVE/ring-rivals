@@ -1192,8 +1192,9 @@ function openOnline(){
 function connect(then){
   const name=document.getElementById("playerNameInput").value.trim()||playerName();
   localStorage.setItem("rr_name",name.slice(0,14));
-  const url=document.getElementById("serverUrl").value.trim();
+  const url=document.getElementById("serverUrl").value.trim() || DEFAULT_SERVER || getServerUrl();
   if(!url){ netStatus("Enter a server URL first."); return; }
+  document.getElementById("serverUrl").value=url;
   localStorage.setItem("rr_server",url);
   if(ws&&ws.readyState===1){ then(); return; }
   try{ ws=new WebSocket(url); }catch(e){ netStatus("Invalid server URL."); return; }
