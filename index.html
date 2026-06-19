@@ -1162,7 +1162,7 @@ function tickEffects(dt){
    12. MULTIPLAYER CLIENT  (lobby + authoritative-server netcode)
    The server runs the simulation; we send inputs and render the snapshots.
    =========================================================================== */
-const DEFAULT_SERVER="";   // baked in after Railway deploy so friends need no setup
+const DEFAULT_SERVER="wss://web-production-15767.up.railway.app";   // baked in so friends need no setup
 let ws=null, myId=null, room=null, isHost=false, online=false, inMatch=false;
 let netInputTimer=null, lastShootSfx=0, prevEntById={}, playerTrail=[];
 
