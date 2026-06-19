@@ -306,7 +306,7 @@ function endGame(room) {
   g.over = true;
   if (room.loop) { clearInterval(room.loop); room.loop = null; }
   const ranked = [...g.entities].sort((a, b) => (a.eliminated - b.eliminated) || (b.score - a.score));
-  const results = ranked.map((e, idx) => ({ id: e.id, name: e.name, score: Math.round(e.score), kos: e.kos, place: idx + 1, isBot: e.isBot, eliminated: e.eliminated }));
+  const results = ranked.map((e, idx) => ({ id: e.id, name: e.name, color: e.color, score: Math.round(e.score), kos: e.kos, place: idx + 1, isBot: e.isBot, eliminated: e.eliminated }));
   broadcast(room, { t: "end", results });
   room.game = null;
   // detach entity refs and return everyone to the lobby
