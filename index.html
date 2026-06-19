@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ring Rivals</title>
+<style>
+/* ============================================================
+   RING RIVALS — styles
+   Dark neon theme, clean panels, rounded buttons.
+   ============================================================ */
+:root{
+  --bg:#0a0e1a;
+  --panel:#121829;
+  --panel2:#1b2336;
+  --accent:#00e5ff;
+  --accent2:#ff3d81;
+  --gold:#ffd33d;
+  --xp:#7c5cff;
+  --good:#27e08a;
+  --bad:#ff5252;
+  --text:#e8eefc;
+  --muted:#8493b5;
+  --radius:14px;
+}
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none;}
+html,body{height:100%;margin:0;}
+body{
+  font-family:"Segoe UI",system-ui,Arial,sans-serif;
+  background:radial-gradient(1200px 800px at 50% -10%,#16203b 0%,var(--bg) 60%);
+  color:var(--text);
+  overflow:hidden;
+}
+.screen{
+  position:absolute;inset:0;display:none;
+  align-items:center;justify-content:center;flex-direction:column;
+  padding:24px;overflow:auto;
+}
+.screen.active{display:flex;}
+
+/* ---- Buttons ---- */
+.btn{
+  border:none;border-radius:var(--radius);cursor:pointer;
+  padding:14px 26px;font-size:16px;font-weight:700;color:#06101f;
+  background:linear-gradient(135deg,var(--accent),#3aa7ff);
+  box-shadow:0 6px 20px rgba(0,229,255,.25);
+  transition:transform .08s ease,box-shadow .15s ease,filter .15s ease;
+  letter-spacing:.5px;
+}
+.btn:hover{transform:translateY(-2px);filter:brightness(1.08);}
+.btn:active{transform:translateY(0);}
+.btn.secondary{background:linear-gradient(135deg,#2a3550,#39456a);color:var(--text);box-shadow:none;}
+.btn.pink{background:linear-gradient(135deg,var(--accent2),#ff7aa8);color:#1a0410;}
+.btn.small{padding:9px 14px;font-size:13px;}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none;}
+
+/* ---- Panels ---- */
+.panel{
+  background:linear-gradient(180deg,var(--panel),#0e1422);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:20px;padding:26px;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);
+  width:min(920px,94vw);
+}
+.title{
+  font-size:64px;font-weight:900;letter-spacing:3px;margin:0;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 0 40px rgba(0,229,255,.25);
+}
+.tagline{color:var(--muted);margin:6px 0 26px;font-size:18px;font-style:italic;}
+.menu-buttons{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;}
+
+/* ---- Stat summary ---- */
+.stat-row{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;}
+.stat-chip{
+  background:var(--panel2);border-radius:12px;padding:10px 16px;min-width:90px;text-align:center;
+  border:1px solid rgba(255,255,255,.05);
+}
+.stat-chip .v{font-size:22px;font-weight:800;}
+.stat-chip .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+.gold{color:var(--gold);}
+.xpc{color:var(--xp);}
+
+/* XP bar */
+.xpbar{height:14px;background:#0c1120;border-radius:8px;overflow:hidden;margin:14px 0;border:1px solid rgba(255,255,255,.06);}
+.xpbar>div{height:100%;background:linear-gradient(90deg,var(--xp),#b39cff);width:0%;transition:width .4s;}
+
+/* ---- Section header ---- */
+.head{display:flex;align-items:center;justify-content:space-between;width:100%;margin-bottom:18px;gap:12px;flex-wrap:wrap;}
+.head h2{margin:0;font-size:30px;}
+.coins-tag{background:var(--panel2);border-radius:10px;padding:8px 14px;font-weight:800;color:var(--gold);border:1px solid rgba(255,211,61,.25);}
+
+/* tabs */
+.tabs{display:flex;gap:10px;margin-bottom:18px;}
+.tab{padding:10px 18px;border-radius:10px;background:var(--panel2);cursor:pointer;font-weight:700;color:var(--muted);border:1px solid transparent;}
+.tab.active{color:var(--text);border-color:var(--accent);background:#16203b;}
+
+/* grid cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;width:100%;}
+.card{
+  background:var(--panel2);border-radius:14px;padding:16px;
+  border:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;gap:8px;
+}
+.card h3{margin:0;font-size:17px;}
+.card .desc{font-size:13px;color:var(--muted);min-height:34px;}
+.card .lvl{font-size:12px;color:var(--accent);font-weight:700;}
+.card .price{font-weight:800;color:var(--gold);}
+.swatch{width:100%;height:46px;border-radius:10px;margin:2px 0;}
+.tag{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;padding:3px 8px;border-radius:6px;display:inline-block;width:fit-content;}
+.tag.owned{background:rgba(39,224,138,.15);color:var(--good);}
+.tag.equipped{background:rgba(0,229,255,.15);color:var(--accent);}
+.tag.locked{background:rgba(255,82,82,.12);color:var(--bad);}
+
+/* ---- Game ---- */
+#gameScreen{padding:0;}
+#gameWrap{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
+#game{background:#070b14;border-radius:0;display:block;}
+#hud{position:absolute;inset:0;pointer-events:none;font-weight:700;}
+.hud-top{position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;}
+.hud-timer{font-size:34px;font-weight:900;text-shadow:0 0 18px rgba(0,229,255,.5);}
+.hud-obj{font-size:14px;color:var(--accent);margin-top:2px;}
+.hud-coins{position:absolute;top:14px;right:18px;font-size:20px;color:var(--gold);text-shadow:0 0 10px rgba(255,211,61,.4);}
+.lboard{position:absolute;top:14px;left:18px;background:rgba(12,18,34,.78);border-radius:12px;padding:10px 12px;min-width:180px;border:1px solid rgba(255,255,255,.07);}
+.lboard .lbtitle{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;}
+.lrow{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:2px 0;}
+.lrow .nm{display:flex;align-items:center;gap:6px;}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+.hud-bottom{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:20px;align-items:center;}
+.bar{width:200px;height:18px;background:rgba(12,18,34,.8);border-radius:9px;overflow:hidden;border:1px solid rgba(255,255,255,.08);}
+.bar>div{height:100%;transition:width .12s;}
+.bar-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+.bar-wrap{display:flex;flex-direction:column;gap:3px;align-items:center;}
+
+/* results */
+.result-title{font-size:54px;font-weight:900;margin:0;}
+.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:min(440px,90vw);margin:18px 0;}
+.result-grid .rcell{background:var(--panel2);border-radius:12px;padding:12px;text-align:center;}
+.result-grid .rcell .v{font-size:26px;font-weight:800;}
+.result-grid .rcell .l{font-size:11px;color:var(--muted);text-transform:uppercase;}
+.levelup{color:var(--gold);font-weight:800;font-size:20px;margin:8px 0;display:none;text-shadow:0 0 16px rgba(255,211,61,.5);}
+
+/* settings rows */
+.set-row{display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);
+  padding:12px 22px;border-radius:12px;font-weight:700;opacity:0;transition:opacity .3s,transform .3s;pointer-events:none;z-index:50;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
+.ach-card{display:flex;align-items:center;gap:12px;background:var(--panel2);border-radius:12px;padding:12px;border:1px solid rgba(255,255,255,.06);}
+.ach-card.done{border-color:var(--good);}
+.ach-ico{font-size:26px;}
+.rank-badge{font-size:13px;font-weight:800;padding:4px 12px;border-radius:8px;letter-spacing:1px;}
+.small-muted{color:var(--muted);font-size:13px;}
+.back-btn{position:absolute;top:18px;left:18px;}
+</style>
+</head>
+<body>
+
+<!-- ============================ MAIN MENU ============================ -->
+<div id="menuScreen" class="screen active">
+  <div class="panel" style="text-align:center;">
+    <h1 class="title">RING RIVALS</h1>
+    <p class="tagline">Control the zone. Knock them out. Climb the ladder.</p>
+
+    <div style="margin-bottom:18px;">
+      <span id="rankBadge" class="rank-badge">BRONZE</span>
+    </div>
+
+    <div class="menu-buttons">
+      <button class="btn" onclick="startMatch()">▶ PLAY</button>
+      <button class="btn secondary" onclick="show('shopScreen');renderShop()">🛒 SHOP</button>
+      <button class="btn secondary" onclick="show('upgradeScreen');renderUpgrades()">⚡ UPGRADES</button>
+      <button class="btn secondary" onclick="show('cosmeticScreen');renderCosmetics()">🎨 COSMETICS</button>
+      <button class="btn secondary" onclick="show('achScreen');renderAchievements()">🏆 ACHIEVEMENTS</button>
+      <button class="btn secondary" onclick="show('settingsScreen')">⚙ SETTINGS</button>
+    </div>
+
+    <button id="dailyBtn" class="btn pink" style="margin-bottom:20px;" onclick="claimDaily()">🎁 DAILY REWARD</button>
+
+    <div class="xpbar"><div id="menuXp"></div></div>
+    <div class="stat-row">
+      <div class="stat-chip"><div class="v gold" id="sCoins">0</div><div class="l">Coins</div></div>
+      <div class="stat-chip"><div class="v xpc" id="sLevel">1</div><div class="l">Level</div></div>
+      <div class="stat-chip"><div class="v" id="sWins">0</div><div class="l">Wins</div></div>
+      <div class="stat-chip"><div class="v" id="sLosses">0</div><div class="l">Losses</div></div>
+      <div class="stat-chip"><div class="v" id="sKos">0</div><div class="l">KOs</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ SHOP HUB ============================ -->
+<div id="shopScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <div class="panel">
+    <div class="head">
+      <h2>🛒 Shop</h2>
+      <div class="coins-tag" id="shopCoins">0 🪙</div>
+    </div>
+    <p class="small-muted">Pick a section:</p>
+    <div class="menu-buttons" style="justify-content:flex-start;">
+      <button class="btn" onclick="show('upgradeScreen');renderUpgrades()">⚡ Stat Upgrades</button>
+      <button class="btn pink" onclick="show('cosmeticScreen');renderCosmetics()">🎨 Cosmetics</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ UPGRADES ============================ -->
+<div id="upgradeScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <div class="panel">
+    <div class="head">
+      <h2>⚡ Stat Upgrades</h2>
+      <div class="coins-tag" id="upCoins">0 🪙</div>
+    </div>
+    <div class="grid" id="upgradeGrid"></div>
+  </div>
+</div>
+
+<!-- ============================ COSMETICS ============================ -->
+<div id="cosmeticScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <div class="panel">
+    <div class="head">
+      <h2>🎨 Cosmetics</h2>
+      <div class="coins-tag" id="cosCoins">0 🪙</div>
+    </div>
+    <div class="tabs" id="cosTabs"></div>
+    <div class="grid" id="cosmeticGrid"></div>
+  </div>
+</div>
+
+<!-- ============================ ACHIEVEMENTS ============================ -->
+<div id="achScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <div class="panel">
+    <div class="head"><h2>🏆 Achievements</h2><div class="coins-tag" id="achCoins">0 🪙</div></div>
+    <div class="grid" id="achGrid"></div>
+  </div>
+</div>
+
+<!-- ============================ SETTINGS ============================ -->
+<div id="settingsScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <div class="panel">
+    <div class="head"><h2>⚙ Settings</h2></div>
+    <div class="set-row"><span>Screen shake</span><button id="shakeToggle" class="btn small secondary" onclick="toggleSetting('shake')">ON</button></div>
+    <div class="set-row"><span>Particles</span><button id="particleToggle" class="btn small secondary" onclick="toggleSetting('particles')">ON</button></div>
+    <div class="set-row"><span>Number of bots</span>
+      <span><button class="btn small secondary" onclick="changeBots(-1)">−</button>
+      <b id="botCount" style="margin:0 12px;">4</b>
+      <button class="btn small secondary" onclick="changeBots(1)">+</button></span>
+    </div>
+    <div class="set-row"><span style="color:var(--bad);">Reset all progress</span><button class="btn small pink" onclick="resetProgress()">RESET</button></div>
+  </div>
+</div>
+
+<!-- ============================ GAME ============================ -->
+<div id="gameScreen" class="screen">
+  <div id="gameWrap">
+    <canvas id="game"></canvas>
+    <div id="hud">
+      <div class="hud-top">
+        <div class="hud-timer" id="hudTimer">2:00</div>
+        <div class="hud-obj" id="hudObj">Capture the glowing zone!</div>
+      </div>
+      <div class="hud-coins">🪙 <span id="hudCoins">0</span></div>
+      <div class="lboard">
+        <div class="lbtitle">Leaderboard — first to 100</div>
+        <div id="lboardRows"></div>
+      </div>
+      <div class="hud-bottom">
+        <div class="bar-wrap"><div class="bar-label">Health</div>
+          <div class="bar"><div id="hudHp" style="background:linear-gradient(90deg,#27e08a,#9cff6e);width:100%;"></div></div></div>
+        <div class="bar-wrap"><div class="bar-label">Dash</div>
+          <div class="bar" style="width:120px;"><div id="hudDash" style="background:linear-gradient(90deg,#00e5ff,#7c5cff);width:100%;"></div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ RESULTS ============================ -->
+<div id="resultScreen" class="screen">
+  <div class="panel" style="text-align:center;">
+    <h1 class="result-title" id="resultTitle">VICTORY</h1>
+    <div class="levelup" id="levelUp">⬆ LEVEL UP!</div>
+    <div class="result-grid">
+      <div class="rcell"><div class="v" id="rPlace">1st</div><div class="l">Placement</div></div>
+      <div class="rcell"><div class="v" id="rScore">0</div><div class="l">Score</div></div>
+      <div class="rcell"><div class="v" id="rKos">0</div><div class="l">KOs</div></div>
+      <div class="rcell"><div class="v gold" id="rCoins">0</div><div class="l">Coins</div></div>
+      <div class="rcell"><div class="v xpc" id="rXp">0</div><div class="l">XP</div></div>
+      <div class="rcell"><div class="v" id="rRank">Bronze</div><div class="l">Rank</div></div>
+    </div>
+    <div class="menu-buttons" style="justify-content:center;">
+      <button class="btn" onclick="startMatch()">🔁 REMATCH</button>
+      <button class="btn secondary" onclick="show('upgradeScreen');renderUpgrades()">⚡ UPGRADES</button>
+      <button class="btn secondary" onclick="show('menuScreen');renderMenu()">🏠 MENU</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ============================================================================
+   RING RIVALS  —  single-file prototype
+   Sections:
+     1. SAVE / LOAD            (localStorage persistence)
+     2. PLAYER DATA / PROGRESSION + config (upgrades, cosmetics, ranks, achievements)
+     3. SHOP / UPGRADES / COSMETICS  (UI + buy logic)
+     4. MENUS / SCREENS         (navigation + rendering of menu/settings/etc.)
+     5. INPUT HANDLING
+     6. GAME STATE + ENTITIES   (Player, Bot, Projectile, Particle, FloatingText)
+     7. PHYSICS / COLLISION
+     8. AI
+     9. MATCH FLOW + REWARDS
+    10. RENDERING
+    11. MAIN LOOP
+   ============================================================================ */
+
+/* ===========================================================================
+   1. SAVE / LOAD
+   =========================================================================== */
+const SAVE_KEY = "ringRivalsSave_v1";
+
+// Default progression object. Anything new added here is merged on load.
+function defaultSave(){
+  return {
+    coins:0, xp:0, level:1, wins:0, losses:0, kos:0, coinsEarnedTotal:0,
+    rankPoints:0,                        // drives rank tier
+    upgrades:{ speed:0, health:0, dash:0, knockback:0, coinMult:0, zoneMult:0 },
+    ownedCosmetics:["char_default"],     // default skin always owned
+    equipped:{ character:"char_default", trail:"trail_none", projectile:"proj_default", arena:"arena_default" },
+    achievements:{},                     // id -> true when claimed
+    settings:{ shake:true, particles:true, bots:4 },
+    lastDaily:0                          // timestamp of last daily claim (day index)
+  };
+}
+
+let save = loadSave();
+
+function loadSave(){
+  try{
+    const raw = localStorage.getItem(SAVE_KEY);
+    if(!raw) return defaultSave();
+    const parsed = JSON.parse(raw);
+    // Merge so new fields/upgrades appear for old saves.
+    const d = defaultSave();
+    return deepMerge(d, parsed);
+  }catch(e){ return defaultSave(); }
+}
+function saveSave(){ localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
+function deepMerge(base, over){
+  for(const k in over){
+    if(over[k] && typeof over[k]==="object" && !Array.isArray(over[k]) && typeof base[k]==="object"){
+      base[k] = deepMerge(base[k]||{}, over[k]);
+    } else { base[k] = over[k]; }
+  }
+  return base;
+}
+
+/* ===========================================================================
+   2. PLAYER DATA / PROGRESSION CONFIG
+   =========================================================================== */
+
+// ---- Upgrade definitions ----
+// base = stat at level 0, perLevel = added per upgrade level, maxLvl, price scaling.
+// Kept MODEST so progression matters but the game never becomes broken.
+const UPGRADES = {
+  speed:    { name:"Speed",            icon:"🏃", base:3.0,  perLevel:0.18, maxLvl:6, baseCost:60,  costMul:1.7, unit:"move spd" },
+  health:   { name:"Max Health",       icon:"❤️", base:100,  perLevel:18,   maxLvl:6, baseCost:70,  costMul:1.7, unit:"HP" },
+  dash:     { name:"Dash Cooldown",    icon:"💨", base:2.5,  perLevel:-0.18,maxLvl:6, baseCost:65,  costMul:1.7, unit:"s cd" },
+  knockback:{ name:"Knockback",        icon:"🔨", base:1.0,  perLevel:0.14, maxLvl:6, baseCost:60,  costMul:1.7, unit:"×force" },
+  coinMult: { name:"Coin Multiplier",  icon:"🪙", base:1.0,  perLevel:0.10, maxLvl:5, baseCost:120, costMul:1.9, unit:"× coins" },
+  zoneMult: { name:"Zone Multiplier",  icon:"🎯", base:1.0,  perLevel:0.08, maxLvl:5, baseCost:120, costMul:1.9, unit:"× zone" },
+};
+// Returns the effective value of a stat given current upgrade level.
+function statVal(key){
+  const u = UPGRADES[key];
+  return u.base + u.perLevel * save.upgrades[key];
+}
+function upgradeCost(key){
+  const u = UPGRADES[key];
+  return Math.round(u.baseCost * Math.pow(u.costMul, save.upgrades[key]));
+}
+
+// ---- Cosmetic definitions ----
+// type groups them into tabs. value used by renderer.
+const COSMETICS = [
+  // characters (color)
+  {id:"char_default", type:"character", name:"Default",     price:0,    value:"#00e5ff"},
+  {id:"char_neon",    type:"character", name:"Neon Blue",   price:150,  value:"#2196ff"},
+  {id:"char_gold",    type:"character", name:"Gold",        price:400,  value:"#ffd33d"},
+  {id:"char_crimson", type:"character", name:"Crimson",     price:300,  value:"#ff2d55"},
+  {id:"char_void",    type:"character", name:"Void Purple", price:500,  value:"#9b4dff"},
+  // trails
+  {id:"trail_none",   type:"trail", name:"No Trail",   price:0,   value:null},
+  {id:"trail_cyber",  type:"trail", name:"Cyber Trail",price:200, value:"#00e5ff"},
+  {id:"trail_fire",   type:"trail", name:"Fire Trail", price:350, value:"#ff7a18"},
+  {id:"trail_ice",    type:"trail", name:"Ice Trail",  price:350, value:"#9ff0ff"},
+  // projectiles
+  {id:"proj_default",  type:"projectile", name:"Default",        price:0,   value:"#ffffff"},
+  {id:"proj_ice",      type:"projectile", name:"Ice Shot",       price:250, value:"#7fe9ff"},
+  {id:"proj_lightning",type:"projectile", name:"Lightning Shot", price:450, value:"#ffe14d"},
+  // arenas
+  {id:"arena_default", type:"arena", name:"Neon Arena",   price:0,   value:"neon"},
+  {id:"arena_dark",    type:"arena", name:"Dark Arena",   price:300, value:"dark"},
+  {id:"arena_retro",   type:"arena", name:"Retro Grid",   price:300, value:"retro"},
+];
+const COS_SLOT = {character:"character", trail:"trail", projectile:"projectile", arena:"arena"};
+function getCosmetic(id){ return COSMETICS.find(c=>c.id===id); }
+function equippedCos(type){ return getCosmetic(save.equipped[type]); }
+
+// ---- Ranks ---- (driven by rankPoints)
+const RANKS = [
+  {name:"Bronze",   color:"#cd7f32", min:0},
+  {name:"Silver",   color:"#c0c0c0", min:300},
+  {name:"Gold",     color:"#ffd33d", min:700},
+  {name:"Platinum", color:"#41e0d0", min:1300},
+  {name:"Diamond",  color:"#7fd0ff", min:2200},
+];
+function currentRank(){
+  let r = RANKS[0];
+  for(const rk of RANKS){ if(save.rankPoints >= rk.min) r = rk; }
+  return r;
+}
+
+// ---- Achievements ---- check() reads save, reward in coins.
+const ACHIEVEMENTS = [
+  {id:"firstWin",  name:"First Win",      icon:"🥇", desc:"Win your first match.",   reward:50,  check:()=>save.wins>=1},
+  {id:"tenKos",    name:"10 KOs",         icon:"💀", desc:"Knock out 10 rivals.",    reward:75,  check:()=>save.kos>=10},
+  {id:"coins1000", name:"1000 Coins",     icon:"💰", desc:"Earn 1000 coins total.",  reward:100, check:()=>save.coinsEarnedTotal>=1000},
+  {id:"level5",    name:"Level 5",        icon:"⭐", desc:"Reach level 5.",          reward:120, check:()=>save.level>=5},
+];
+
+// ---- XP / leveling ----
+function xpForLevel(lvl){ return 100 + (lvl-1)*60; }   // rising requirement
+function addXp(amount){
+  save.xp += amount;
+  let leveled = false;
+  while(save.xp >= xpForLevel(save.level)){
+    save.xp -= xpForLevel(save.level);
+    save.level++;
+    const bonus = 25 + save.level*5;     // level-up bonus coins
+    save.coins += bonus; save.coinsEarnedTotal += bonus;
+    leveled = true;
+  }
+  return leveled;
+}
+function addCoins(n){ save.coins += n; save.coinsEarnedTotal += n; }
+
+/* ===========================================================================
+   3 + 4. SCREENS / MENUS / SHOP RENDERING
+   =========================================================================== */
+function show(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+function fmt(n){ return Math.round(n).toLocaleString(); }
+function toast(msg){
+  const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("show"),1800);
+}
+
+function renderMenu(){
+  document.getElementById("sCoins").textContent  = fmt(save.coins);
+  document.getElementById("sLevel").textContent  = save.level;
+  document.getElementById("sWins").textContent   = save.wins;
+  document.getElementById("sLosses").textContent = save.losses;
+  document.getElementById("sKos").textContent    = save.kos;
+  const need = xpForLevel(save.level);
+  document.getElementById("menuXp").style.width = Math.min(100, save.xp/need*100)+"%";
+  const r = currentRank();
+  const rb = document.getElementById("rankBadge");
+  rb.textContent = r.name.toUpperCase(); rb.style.background = r.color; rb.style.color="#0a0e1a";
+  // daily button state
+  const dayIdx = Math.floor(Date.now()/86400000);
+  const db = document.getElementById("dailyBtn");
+  if(save.lastDaily === dayIdx){ db.disabled=true; db.textContent="🎁 DAILY CLAIMED"; }
+  else { db.disabled=false; db.textContent="🎁 DAILY REWARD"; }
+}
+
+function claimDaily(){
+  const dayIdx = Math.floor(Date.now()/86400000);
+  if(save.lastDaily===dayIdx){ toast("Already claimed today!"); return; }
+  const reward = 50 + save.level*5;
+  addCoins(reward); save.lastDaily = dayIdx; saveSave(); renderMenu();
+  toast("🎁 Daily reward: +"+reward+" coins!");
+}
+
+// ---- Upgrades UI ----
+function renderUpgrades(){
+  setCoinTags();
+  const grid = document.getElementById("upgradeGrid"); grid.innerHTML="";
+  for(const key in UPGRADES){
+    const u = UPGRADES[key]; const lvl = save.upgrades[key]; const maxed = lvl>=u.maxLvl;
+    const cost = upgradeCost(key);
+    const cur = statVal(key); const nxt = u.base + u.perLevel*(lvl+1);
+    const card = document.createElement("div"); card.className="card";
+    card.innerHTML = `
+      <h3>${u.icon} ${u.name}</h3>
+      <div class="lvl">Level ${lvl} / ${u.maxLvl}</div>
+      <div class="desc">Now: <b>${cur.toFixed(2)} ${u.unit}</b>${maxed?"":` → Next: <b>${nxt.toFixed(2)}</b>`}</div>
+      <div class="price">${maxed?"MAXED":cost+" 🪙"}</div>
+      <button class="btn small" ${maxed||save.coins<cost?"disabled":""} onclick="buyUpgrade('${key}')">
+        ${maxed?"MAX":"BUY"}</button>`;
+    grid.appendChild(card);
+  }
+}
+function buyUpgrade(key){
+  const u=UPGRADES[key];
+  if(save.upgrades[key]>=u.maxLvl) return;
+  const cost=upgradeCost(key);
+  if(save.coins<cost){ toast("Not enough coins!"); return; }
+  save.coins-=cost; save.upgrades[key]++; saveSave();
+  renderUpgrades(); toast(u.name+" upgraded!");
+}
+
+// ---- Cosmetics UI ----
+let cosTab = "character";
+function renderCosmetics(){
+  setCoinTags();
+  // build tabs
+  const tabs=document.getElementById("cosTabs"); tabs.innerHTML="";
+  const labels={character:"Characters",trail:"Trails",projectile:"Projectiles",arena:"Arenas"};
+  for(const t in labels){
+    const el=document.createElement("div"); el.className="tab"+(t===cosTab?" active":"");
+    el.textContent=labels[t]; el.onclick=()=>{cosTab=t;renderCosmetics();};
+    tabs.appendChild(el);
+  }
+  const grid=document.getElementById("cosmeticGrid"); grid.innerHTML="";
+  COSMETICS.filter(c=>c.type===cosTab).forEach(c=>{
+    const owned = save.ownedCosmetics.includes(c.id);
+    const equipped = save.equipped[c.type]===c.id;
+    let tag = equipped?`<span class="tag equipped">Equipped</span>`
+            : owned?`<span class="tag owned">Owned</span>`
+            : `<span class="tag locked">${c.price} 🪙</span>`;
+    // preview swatch
+    let preview="";
+    if(c.type==="arena") preview=`<div class="swatch" style="background:${arenaPreview(c.value)}"></div>`;
+    else if(c.type==="trail") preview=`<div class="swatch" style="background:${c.value?`linear-gradient(90deg,transparent,${c.value})`:"#0c1120"}"></div>`;
+    else preview=`<div class="swatch" style="background:radial-gradient(circle at 40% 40%,${c.value},#0c1120)"></div>`;
+    let btn="";
+    if(equipped) btn=`<button class="btn small secondary" disabled>EQUIPPED</button>`;
+    else if(owned) btn=`<button class="btn small" onclick="equipCos('${c.id}')">EQUIP</button>`;
+    else btn=`<button class="btn small pink" ${save.coins<c.price?"disabled":""} onclick="buyCos('${c.id}')">BUY</button>`;
+    const card=document.createElement("div"); card.className="card";
+    card.innerHTML=`<h3>${c.name}</h3>${preview}${tag}${btn}`;
+    grid.appendChild(card);
+  });
+}
+function arenaPreview(v){
+  if(v==="dark") return "#05070d";
+  if(v==="retro") return "repeating-linear-gradient(0deg,#1a0e2e,#1a0e2e 8px,#2a1545 9px),repeating-linear-gradient(90deg,#1a0e2e,#1a0e2e 8px,#2a1545 9px)";
+  return "radial-gradient(circle,#16203b,#070b14)";
+}
+function buyCos(id){
+  const c=getCosmetic(id);
+  if(save.ownedCosmetics.includes(id)) return;
+  if(save.coins<c.price){ toast("Not enough coins!"); return; }
+  save.coins-=c.price; save.ownedCosmetics.push(id);
+  save.equipped[c.type]=id;            // auto-equip on purchase
+  saveSave(); renderCosmetics(); toast(c.name+" unlocked & equipped!");
+}
+function equipCos(id){
+  const c=getCosmetic(id);
+  save.equipped[c.type]=id; saveSave(); renderCosmetics();
+}
+
+function setCoinTags(){
+  ["shopCoins","upCoins","cosCoins","achCoins"].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.textContent=fmt(save.coins)+" 🪙";
+  });
+}
+
+// ---- Achievements UI ----
+function renderAchievements(){
+  setCoinTags();
+  const grid=document.getElementById("achGrid"); grid.innerHTML="";
+  ACHIEVEMENTS.forEach(a=>{
+    const done=save.achievements[a.id];
+    const card=document.createElement("div"); card.className="ach-card"+(done?" done":"");
+    card.innerHTML=`<div class="ach-ico">${a.icon}</div>
+      <div><h3 style="margin:0;font-size:16px;">${a.name}</h3>
+      <div class="small-muted">${a.desc}</div>
+      <div class="price">${done?"✓ Claimed (+"+a.reward+")":"Reward: "+a.reward+" 🪙"}</div></div>`;
+    grid.appendChild(card);
+  });
+}
+// Check + auto-claim any newly-earned achievements. Returns list of names earned.
+function checkAchievements(){
+  const earned=[];
+  ACHIEVEMENTS.forEach(a=>{
+    if(!save.achievements[a.id] && a.check()){
+      save.achievements[a.id]=true; addCoins(a.reward); earned.push(a.name+" (+"+a.reward+")");
+    }
+  });
+  return earned;
+}
+
+// ---- Settings ----
+function refreshSettingsUI(){
+  document.getElementById("shakeToggle").textContent = save.settings.shake?"ON":"OFF";
+  document.getElementById("particleToggle").textContent = save.settings.particles?"ON":"OFF";
+  document.getElementById("botCount").textContent = save.settings.bots;
+}
+function toggleSetting(k){ save.settings[k]=!save.settings[k]; saveSave(); refreshSettingsUI(); }
+function changeBots(d){ save.settings.bots=Math.max(3,Math.min(5,save.settings.bots+d)); saveSave(); refreshSettingsUI(); }
+function resetProgress(){
+  if(confirm("Reset ALL progress? This cannot be undone.")){
+    save=defaultSave(); saveSave(); refreshSettingsUI(); renderMenu(); show("menuScreen");
+    toast("Progress reset.");
+  }
+}
+
+/* ===========================================================================
+   5. INPUT HANDLING
+   =========================================================================== */
+const keys={};
+const mouse={x:0,y:0,down:false};
+window.addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(e.key===" ") e.preventDefault();
+});
+window.addEventListener("keyup",e=>{ keys[e.key.toLowerCase()]=false; });
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+canvas.addEventListener("mousemove",e=>{
+  const r=canvas.getBoundingClientRect();
+  mouse.x=(e.clientX-r.left)*(canvas.width/r.width);
+  mouse.y=(e.clientY-r.top)*(canvas.height/r.height);
+});
+canvas.addEventListener("mousedown",e=>{ if(e.button===0) mouse.down=true; });
+canvas.addEventListener("mouseup",e=>{ if(e.button===0) mouse.down=false; });
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
+
+/* ===========================================================================
+   6. GAME STATE + ENTITIES
+   =========================================================================== */
+const BOT_NAMES=["Bolt","Hex","Nova","Tank","Viper"];
+const BOT_COLORS=["#ff5252","#27e08a","#ffa726","#b388ff","#26c6da"];
+const MATCH_TIME=120;      // seconds
+const SCORE_TO_WIN=100;
+const ZONE_PER_SEC=8;      // base zone score per second
+const PROJ_DMG=12;
+const ARENA_R=440;         // arena radius (world units)
+
+let G=null;                // active game object
+
+class Entity{
+  constructor(x,y,color,name,isPlayer){
+    this.x=x;this.y=y;this.vx=0;this.vy=0;this.r=18;
+    this.color=color;this.name=name;this.isPlayer=!!isPlayer;
+    this.maxHp = isPlayer ? statVal("health") : 100;
+    this.hp=this.maxHp;
+    this.score=0;this.kos=0;this.dead=false;this.respawn=0;
+    this.angle=0; this.dashTimer=0; this.shootTimer=0;
+    this.dashV=0; this.dashDx=0; this.dashDy=0;
+    this.trail=[];                     // recent positions for trail effect
+    this.aiState={dashCd:0};
+  }
+  get speed(){ return this.isPlayer ? statVal("speed") : 2.7; }
+  get knock(){ return this.isPlayer ? statVal("knockback") : 1.0; }
+  get dashCd(){ return this.isPlayer ? statVal("dash") : 3.2; }
+}
+
+class Projectile{
+  constructor(x,y,dx,dy,owner){
+    this.x=x;this.y=y;this.dx=dx;this.dy=dy;this.owner=owner;
+    this.r=7;this.life=1.2;this.dead=false;
+    this.color = owner.isPlayer ? equippedCos("projectile").value : "#ff8080";
+    this.knock = owner.knock;
+  }
+}
+class Particle{
+  constructor(x,y,color){
+    this.x=x;this.y=y;const a=Math.random()*Math.PI*2,s=Math.random()*4+1;
+    this.dx=Math.cos(a)*s;this.dy=Math.sin(a)*s;
+    this.life=1;this.color=color;this.r=Math.random()*3+1;
+  }
+}
+class FloatText{
+  constructor(x,y,text,color){ this.x=x;this.y=y;this.text=text;this.color=color;this.life=1;this.dy=-0.8; }
+}
+
+function spawnParticles(x,y,color,n){
+  if(!save.settings.particles) return;
+  for(let i=0;i<n;i++) G.particles.push(new Particle(x,y,color));
+}
+function floatText(x,y,text,color){ G.floats.push(new FloatText(x,y,text,color)); }
+function shake(amt){ if(save.settings.shake) G.shake=Math.min(G.shake+amt,18); }
+
+/* ===========================================================================
+   9. MATCH FLOW
+   =========================================================================== */
+function startMatch(){
+  resizeCanvas();
+  const cx=canvas.width/2, cy=canvas.height/2;
+  G={
+    entities:[], projectiles:[], particles:[], floats:[],
+    cx, cy, time:MATCH_TIME, shake:0, over:false,
+    zone:{x:cx,y:cy,r:90,timer:12}, coinsEarned:0, kosThisMatch:0,
+    arena:equippedCos("arena").value
+  };
+  // player
+  const player=new Entity(cx, cy+150, equippedCos("character").value, "You", true);
+  G.entities.push(player); G.player=player;
+  // bots (use settings count)
+  const n=save.settings.bots;
+  for(let i=0;i<n;i++){
+    const a=(i/n)*Math.PI*2;
+    const b=new Entity(cx+Math.cos(a)*200, cy+Math.sin(a)*200, BOT_COLORS[i%BOT_COLORS.length], BOT_NAMES[i%BOT_NAMES.length]);
+    G.entities.push(b);
+  }
+  moveZone();
+  show("gameScreen");
+}
+
+function moveZone(){
+  // pick a random point well inside the arena
+  const a=Math.random()*Math.PI*2, d=Math.random()*(ARENA_R-140);
+  G.zone.x=G.cx+Math.cos(a)*d; G.zone.y=G.cy+Math.sin(a)*d;
+  G.zone.timer = 10+Math.random()*5;   // 10-15s
+  G.zone.r = 90;
+}
+
+function endMatch(){
+  if(G.over) return; G.over=true;
+  // ranking by score
+  const ranked=[...G.entities].sort((a,b)=>b.score-a.score);
+  const place=ranked.indexOf(G.player)+1;
+  const won = place===1 && G.player.score>0;
+
+  // ---- rewards ----
+  const coinMult=statVal("coinMult");
+  let coins = Math.round((won?75:25) * coinMult);
+  coins += G.player.kos*Math.round(15*coinMult);
+  let xp = 50 + G.player.kos*10 + (won?50:0);
+
+  addCoins(coins);
+  if(won){ save.wins++; save.rankPoints += 50 + Math.round(G.player.score/2); }
+  else   { save.losses++; save.rankPoints += 10 + Math.round(G.player.score/4); }
+  save.kos += G.player.kos;
+  const leveled = addXp(xp);
+
+  // achievements (may add coins)
+  const earned = checkAchievements();
+  saveSave();
+
+  // ---- results UI ----
+  document.getElementById("resultTitle").textContent = won?"VICTORY":"DEFEAT";
+  document.getElementById("resultTitle").style.color = won?"var(--good)":"var(--bad)";
+  document.getElementById("rPlace").textContent = ordinal(place);
+  document.getElementById("rScore").textContent = Math.round(G.player.score);
+  document.getElementById("rKos").textContent = G.player.kos;
+  document.getElementById("rCoins").textContent = "+"+coins;
+  document.getElementById("rXp").textContent = "+"+xp;
+  const r=currentRank();
+  const rr=document.getElementById("rRank"); rr.textContent=r.name; rr.style.color=r.color;
+  document.getElementById("levelUp").style.display = leveled?"block":"none";
+  show("resultScreen");
+  if(earned.length) setTimeout(()=>toast("🏆 "+earned.join(", ")),600);
+}
+function ordinal(n){ return n+(["th","st","nd","rd"][(n%100>10&&n%100<14)||n%10>3?0:n%10]||"th"); }
+
+/* ===========================================================================
+   7. PHYSICS / COLLISION + update
+   =========================================================================== */
+function resizeCanvas(){
+  canvas.width = Math.min(window.innerWidth, 1100);
+  canvas.height = Math.min(window.innerHeight, 760);
+}
+window.addEventListener("resize",()=>{ if(G){ resizeCanvas(); G.cx=canvas.width/2; G.cy=canvas.height/2; }});
+
+function entityShoot(e, tx, ty){
+  if(e.shootTimer>0) return;
+  e.shootTimer = e.isPlayer?0.28:0.7;
+  const a=Math.atan2(ty-e.y, tx-e.x);
+  const spd=9;
+  G.projectiles.push(new Projectile(e.x+Math.cos(a)*e.r, e.y+Math.sin(a)*e.r, Math.cos(a)*spd, Math.sin(a)*spd, e));
+  // self knockback recoil (small)
+  e.vx-=Math.cos(a)*0.4*e.knock; e.vy-=Math.sin(a)*0.4*e.knock;
+}
+function entityDash(e, dx, dy){
+  if(e.dashTimer>0) return;
+  const len=Math.hypot(dx,dy)||1;
+  e.dashTimer=e.dashCd;
+  e.dashV=14; e.dashDx=dx/len; e.dashDy=dy/len;
+  spawnParticles(e.x,e.y,e.color,12);
+}
+
+function damage(target, amount, fromPlayer, src){
+  if(target.dead) return;
+  target.hp-=amount;
+  floatText(target.x,target.y-target.r-6,"-"+Math.round(amount),"#ff7a7a");
+  spawnParticles(target.x,target.y,"#ff5252",6);
+  if(target.isPlayer) shake(6);
+  if(target.hp<=0){ koEntity(target, src); }
+}
+function koEntity(target, src){
+  target.dead=true; target.respawn=2.5;
+  spawnParticles(target.x,target.y,target.color,28); shake(10);
+  floatText(target.x,target.y,"KO!","#ffd33d");
+  if(src){
+    src.kos++;
+    if(src.isPlayer){
+      const reward=Math.round(15*statVal("coinMult"));
+      G.coinsEarned+=reward; addCoins(reward);
+      floatText(src.x,src.y-30,"+"+reward+" 🪙","#ffd33d");
+    }
+  }
+}
+
+function update(dt){
+  if(!G||G.over) return;
+  // timer
+  G.time-=dt;
+  if(G.time<=0){ G.time=0; endMatch(); return; }
+  // zone movement
+  G.zone.timer-=dt;
+  if(G.zone.timer<=0){ moveZone(); floatText(G.zone.x,G.zone.y-G.zone.r,"ZONE MOVED","#00e5ff"); }
+
+  // ---- entities ----
+  for(const e of G.entities){
+    if(e.dead){
+      e.respawn-=dt;
+      if(e.respawn<=0){ // respawn near center
+        e.dead=false; e.hp=e.maxHp;
+        const a=Math.random()*Math.PI*2;
+        e.x=G.cx+Math.cos(a)*120; e.y=G.cy+Math.sin(a)*120; e.vx=e.vy=0;
+      }
+      continue;
+    }
+    e.shootTimer=Math.max(0,e.shootTimer-dt);
+    e.dashTimer=Math.max(0,e.dashTimer-dt);
+
+    if(e.isPlayer) controlPlayer(e,dt);
+    else runAI(e,dt);
+
+    // dash motion overrides normal accel
+    if(e.dashV>0){
+      e.x+=e.dashDx*e.dashV; e.y+=e.dashDy*e.dashV;
+      e.dashV*=0.82; if(e.dashV<1) e.dashV=0;
+      spawnParticles(e.x,e.y,e.color,1);
+    }
+    // apply velocity + friction
+    e.x+=e.vx; e.y+=e.vy; e.vx*=0.86; e.vy*=0.86;
+
+    // arena bounds — knocked outside = take damage & shove back
+    const ddx=e.x-G.cx, ddy=e.y-G.cy, dist=Math.hypot(ddx,ddy);
+    if(dist>ARENA_R-e.r){
+      const nx=ddx/dist, ny=ddy/dist;
+      // if shoved hard past edge, big damage (ring-out feel)
+      if(dist>ARENA_R+10){ damage(e, 30*dt*60*0.016*8, false, e._lastHitBy); }
+      e.x=G.cx+nx*(ARENA_R-e.r); e.y=G.cy+ny*(ARENA_R-e.r);
+      e.vx*=-0.4; e.vy*=-0.4;
+    }
+
+    // zone scoring
+    const zdist=Math.hypot(e.x-G.zone.x, e.y-G.zone.y);
+    if(zdist < G.zone.r && !e.dead){
+      const mult = e.isPlayer ? statVal("zoneMult") : 1;
+      e.score += ZONE_PER_SEC*mult*dt;
+      if(Math.random()<0.15) spawnParticles(e.x,e.y, e.isPlayer?"#00e5ff":e.color,1);
+      if(e.isPlayer && Math.random()<dt*2) floatText(e.x,e.y-e.r-4,"+score","#00e5ff");
+      if(e.score>=SCORE_TO_WIN){ endMatch(); return; }
+    }
+    // trail history
+    e.trail.push({x:e.x,y:e.y}); if(e.trail.length>12) e.trail.shift();
+  }
+
+  // ---- projectiles ----
+  for(const p of G.projectiles){
+    p.x+=p.dx; p.y+=p.dy; p.life-=dt;
+    if(p.life<=0){ p.dead=true; continue; }
+    for(const e of G.entities){
+      if(e===p.owner||e.dead) continue;
+      if(Math.hypot(e.x-p.x,e.y-p.y) < e.r+p.r){
+        // knockback
+        const a=Math.atan2(p.dy,p.dx);
+        const force=6*p.knock;
+        e.vx+=Math.cos(a)*force; e.vy+=Math.sin(a)*force;
+        e._lastHitBy=p.owner;
+        damage(e, PROJ_DMG, p.owner.isPlayer, p.owner);
+        p.dead=true; break;
+      }
+    }
+  }
+  G.projectiles=G.projectiles.filter(p=>!p.dead);
+
+  // entity-entity body collision (soft push)
+  for(let i=0;i<G.entities.length;i++)for(let j=i+1;j<G.entities.length;j++){
+    const a=G.entities[i],b=G.entities[j]; if(a.dead||b.dead) continue;
+    const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy),min=a.r+b.r;
+    if(d<min&&d>0){ const ov=(min-d)/2,nx=dx/d,ny=dy/d;
+      a.x-=nx*ov;a.y-=ny*ov;b.x+=nx*ov;b.y+=ny*ov; }
+  }
+
+  // particles & floats
+  for(const pt of G.particles){ pt.x+=pt.dx; pt.y+=pt.dy; pt.dx*=0.94; pt.dy*=0.94; pt.life-=dt*1.8; }
+  G.particles=G.particles.filter(p=>p.life>0);
+  for(const f of G.floats){ f.y+=f.dy; f.life-=dt*1.1; }
+  G.floats=G.floats.filter(f=>f.life>0);
+
+  G.shake*=0.85;
+  G.coinsEarnedDisplay=G.coinsEarned;
+  updateHUD();
+}
+
+function controlPlayer(e,dt){
+  let dx=0,dy=0;
+  if(keys["w"])dy-=1; if(keys["s"])dy+=1; if(keys["a"])dx-=1; if(keys["d"])dx+=1;
+  const len=Math.hypot(dx,dy);
+  if(len>0){ dx/=len;dy/=len; e.vx+=dx*e.speed*0.25; e.vy+=dy*e.speed*0.25; }
+  // cap velocity
+  const sp=Math.hypot(e.vx,e.vy), max=e.speed;
+  if(sp>max){ e.vx=e.vx/sp*max; e.vy=e.vy/sp*max; }
+  e.angle=Math.atan2(mouse.y-e.y, mouse.x-e.x);
+  if(mouse.down) entityShoot(e,mouse.x,mouse.y);
+  if(keys[" "]){ entityDash(e, (dx||Math.cos(e.angle)), (dy||Math.sin(e.angle))); }
+}
+
+/* ===========================================================================
+   8. AI
+   =========================================================================== */
+function runAI(e,dt){
+  // target nearest living enemy
+  let nearest=null,nd=1e9;
+  for(const o of G.entities){ if(o===e||o.dead) continue;
+    const d=Math.hypot(o.x-e.x,o.y-e.y); if(d<nd){nd=d;nearest=o;} }
+
+  // movement goal: if not in zone, head to zone; else jitter inside it
+  const zd=Math.hypot(e.x-G.zone.x,e.y-G.zone.y);
+  let gx,gy;
+  if(zd>G.zone.r-20){ gx=G.zone.x; gy=G.zone.y; }
+  else { gx=G.zone.x+(Math.sin(G.time*2+e.x)*30); gy=G.zone.y+(Math.cos(G.time*2+e.y)*30); }
+  const a=Math.atan2(gy-e.y,gx-e.x);
+  e.vx+=Math.cos(a)*e.speed*0.18; e.vy+=Math.sin(a)*e.speed*0.18;
+  const sp=Math.hypot(e.vx,e.vy);
+  if(sp>e.speed){ e.vx=e.vx/sp*e.speed; e.vy=e.vy/sp*e.speed; }
+
+  // aim + shoot at nearest enemy if in range
+  if(nearest && nd<360){
+    e.angle=Math.atan2(nearest.y-e.y,nearest.x-e.x);
+    if(Math.random()<dt*1.5) entityShoot(e,nearest.x,nearest.y);
+  } else { e.angle=a; }
+
+  // occasional dash (toward zone or away if low hp)
+  e.aiState.dashCd-=dt;
+  if(e.aiState.dashCd<=0 && e.dashTimer<=0){
+    e.aiState.dashCd=2+Math.random()*3;
+    if(e.hp<35 && nearest){ entityDash(e, e.x-nearest.x, e.y-nearest.y); } // flee
+    else entityDash(e, gx-e.x, gy-e.y);
+  }
+}
+
+/* ===========================================================================
+   HUD
+   =========================================================================== */
+function updateHUD(){
+  const m=Math.floor(G.time/60), s=Math.floor(G.time%60);
+  document.getElementById("hudTimer").textContent=m+":"+String(s).padStart(2,"0");
+  document.getElementById("hudCoins").textContent=G.coinsEarned;
+  document.getElementById("hudHp").style.width=Math.max(0,G.player.hp/G.player.maxHp*100)+"%";
+  const dashPct=100*(1-G.player.dashTimer/G.player.dashCd);
+  document.getElementById("hudDash").style.width=Math.min(100,Math.max(0,dashPct))+"%";
+  // objective text
+  const lead=[...G.entities].sort((a,b)=>b.score-a.score)[0];
+  document.getElementById("hudObj").textContent =
+    (lead===G.player?"You lead! ":lead.name+" leads. ") + "Hold the zone to "+SCORE_TO_WIN;
+  // leaderboard
+  const ranked=[...G.entities].sort((a,b)=>b.score-a.score);
+  document.getElementById("lboardRows").innerHTML = ranked.map(e=>
+    `<div class="lrow"><span class="nm"><span class="dot" style="background:${e.color}"></span>${e.name}${e.dead?" 💀":""}</span><b>${Math.round(e.score)}</b></div>`
+  ).join("");
+}
+
+/* ===========================================================================
+   10. RENDERING
+   =========================================================================== */
+function render(){
+  ctx.save();
+  // screen shake
+  if(G.shake>0) ctx.translate((Math.random()-0.5)*G.shake,(Math.random()-0.5)*G.shake);
+
+  drawArena();
+
+  // zone
+  const z=G.zone;
+  const pulse=0.5+0.5*Math.sin(Date.now()/300);
+  const grad=ctx.createRadialGradient(z.x,z.y,10,z.x,z.y,z.r);
+  grad.addColorStop(0,"rgba(0,229,255,"+(0.28+pulse*0.12)+")");
+  grad.addColorStop(1,"rgba(0,229,255,0)");
+  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(z.x,z.y,z.r,0,7); ctx.fill();
+  ctx.strokeStyle="rgba(0,229,255,"+(0.6+pulse*0.4)+")"; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(z.x,z.y,z.r,0,7); ctx.stroke();
+
+  // particles
+  for(const p of G.particles){
+    ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // projectiles
+  for(const p of G.projectiles){
+    ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=12;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); ctx.shadowBlur=0;
+  }
+
+  // entities
+  for(const e of G.entities){ if(!e.dead) drawEntity(e); }
+
+  // floating text
+  for(const f of G.floats){
+    ctx.globalAlpha=Math.max(0,f.life); ctx.fillStyle=f.color;
+    ctx.font="bold 16px Segoe UI"; ctx.textAlign="center";
+    ctx.fillText(f.text,f.x,f.y);
+  }
+  ctx.globalAlpha=1;
+
+  // directional arrow to zone (if player far)
+  if(G.player && !G.player.dead){
+    const zd=Math.hypot(G.player.x-G.zone.x,G.player.y-G.zone.y);
+    if(zd>G.zone.r+40){
+      const a=Math.atan2(G.zone.y-G.player.y,G.zone.x-G.player.x);
+      const ax=G.player.x+Math.cos(a)*40, ay=G.player.y+Math.sin(a)*40;
+      ctx.save(); ctx.translate(ax,ay); ctx.rotate(a);
+      ctx.fillStyle="rgba(0,229,255,.8)";
+      ctx.beginPath(); ctx.moveTo(10,0); ctx.lineTo(-6,-6); ctx.lineTo(-6,6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  drawMinimap();
+}
+
+function drawArena(){
+  ctx.fillStyle = G.arena==="dark"?"#05070d":G.arena==="retro"?"#100a1f":"#070b14";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  // arena circle
+  ctx.save();
+  const g=ctx.createRadialGradient(G.cx,G.cy,ARENA_R*0.3,G.cx,G.cy,ARENA_R);
+  if(G.arena==="dark"){ g.addColorStop(0,"#0b1020"); g.addColorStop(1,"#04060c"); }
+  else if(G.arena==="retro"){ g.addColorStop(0,"#1c1133"); g.addColorStop(1,"#0c0718"); }
+  else { g.addColorStop(0,"#0f1730"); g.addColorStop(1,"#070b14"); }
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(G.cx,G.cy,ARENA_R,0,7); ctx.fill();
+
+  // retro grid lines inside arena
+  if(G.arena==="retro"){
+    ctx.save(); ctx.beginPath(); ctx.arc(G.cx,G.cy,ARENA_R,0,7); ctx.clip();
+    ctx.strokeStyle="rgba(124,92,255,.25)"; ctx.lineWidth=1;
+    for(let x=G.cx-ARENA_R;x<G.cx+ARENA_R;x+=28){ ctx.beginPath();ctx.moveTo(x,G.cy-ARENA_R);ctx.lineTo(x,G.cy+ARENA_R);ctx.stroke(); }
+    for(let y=G.cy-ARENA_R;y<G.cy+ARENA_R;y+=28){ ctx.beginPath();ctx.moveTo(G.cx-ARENA_R,y);ctx.lineTo(G.cx+ARENA_R,y);ctx.stroke(); }
+    ctx.restore();
+  }
+  // glowing edge ring
+  const edge = G.arena==="retro"?"#9b4dff":G.arena==="dark"?"#3a7bd5":"#00e5ff";
+  ctx.strokeStyle=edge; ctx.lineWidth=5; ctx.shadowColor=edge; ctx.shadowBlur=25;
+  ctx.beginPath(); ctx.arc(G.cx,G.cy,ARENA_R,0,7); ctx.stroke(); ctx.shadowBlur=0;
+  ctx.restore();
+}
+
+function drawEntity(e){
+  // trail
+  const tcos=equippedCos("trail");
+  if(e.isPlayer && tcos.value){
+    for(let i=0;i<e.trail.length;i++){
+      const t=e.trail[i]; ctx.globalAlpha=i/e.trail.length*0.5;
+      ctx.fillStyle=tcos.value; ctx.beginPath(); ctx.arc(t.x,t.y,e.r*(i/e.trail.length),0,7); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  // body glow
+  ctx.save();
+  ctx.shadowColor=e.color; ctx.shadowBlur=e.isPlayer?22:12;
+  ctx.fillStyle=e.color; ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,7); ctx.fill();
+  ctx.shadowBlur=0;
+  // inner
+  ctx.fillStyle="rgba(255,255,255,.85)"; ctx.beginPath(); ctx.arc(e.x,e.y,e.r*0.45,0,7); ctx.fill();
+  // aim barrel
+  ctx.strokeStyle="#fff"; ctx.lineWidth=4; ctx.beginPath();
+  ctx.moveTo(e.x,e.y); ctx.lineTo(e.x+Math.cos(e.angle)*(e.r+10),e.y+Math.sin(e.angle)*(e.r+10)); ctx.stroke();
+  ctx.restore();
+  // name + hp bar
+  ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center";
+  ctx.fillText(e.name, e.x, e.y-e.r-14);
+  const bw=36; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(e.x-bw/2,e.y-e.r-10,bw,5);
+  ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252";
+  ctx.fillRect(e.x-bw/2,e.y-e.r-10,bw*Math.max(0,e.hp/e.maxHp),5);
+}
+
+function drawMinimap(){
+  const size=110, pad=14, mx=canvas.width-size-pad, my=canvas.height-size-pad, rad=size/2;
+  ctx.save();
+  ctx.globalAlpha=0.9; ctx.fillStyle="rgba(8,12,22,.8)";
+  ctx.beginPath(); ctx.arc(mx+rad,my+rad,rad,0,7); ctx.fill();
+  ctx.strokeStyle="rgba(0,229,255,.5)"; ctx.lineWidth=2; ctx.stroke();
+  const scale=rad/ARENA_R;
+  const tx=v=>mx+rad+(v-G.cx)*scale, ty=v=>my+rad+(v-G.cy)*scale;
+  // zone
+  ctx.fillStyle="rgba(0,229,255,.4)";
+  ctx.beginPath(); ctx.arc(tx(G.zone.x),ty(G.zone.y),G.zone.r*scale,0,7); ctx.fill();
+  // entities
+  for(const e of G.entities){ if(e.dead) continue;
+    ctx.fillStyle=e.isPlayer?"#fff":e.color;
+    ctx.beginPath(); ctx.arc(tx(e.x),ty(e.y),e.isPlayer?4:3,0,7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ===========================================================================
+   11. MAIN LOOP
+   =========================================================================== */
+let last=performance.now();
+function loop(now){
+  let dt=(now-last)/1000; last=now;
+  if(dt>0.05) dt=0.05;            // clamp big frame gaps
+  if(G && !G.over && document.getElementById("gameScreen").classList.contains("active")){
+    update(dt);
+    render();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ---- boot ---- */
+refreshSettingsUI();
+renderMenu();
+saveSave();
+</script>
+</body>
+</html>
