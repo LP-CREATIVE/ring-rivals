@@ -41,6 +41,27 @@ const ZONE_MODE_KEYS = ["classic", "koth", "shrink"];
 const POWERUP_TYPES = ["health", "speed", "rapid"];
 
 /* ===========================================================================
+   SKILL COMBAT — weapon balance table.
+   *** KEEP THIS TABLE IDENTICAL TO THE COPY IN index.html ***  (client mirrors
+   the sim for single-player; both must agree or multiplayer desyncs.)
+   Tuning lives here: damage, magazine, reload, fire cadence, bloom, knockback.
+   mode: semi | burst | shotgun | charge | disc
+   =========================================================================== */
+const WEAPONS = {
+  blaster: { name: "Blaster",   mode: "semi",    mag: 6, reload: 1.1, fireCd: 0.20, projSpeed: 10, dmg: 14, projR: 7, life: 1.1, knock: 1.0, bloomAdd: 0.05, bloomMax: 0.20, bloomDecay: 0.6, color: "#ffffff", ability: "power" },
+  burst:   { name: "Burst Rifle", mode: "burst", mag: 4, reload: 1.3, fireCd: 0.46, projSpeed: 13, dmg: 8,  projR: 5, life: 1.0, knock: 0.6, bloomAdd: 0.04, bloomMax: 0.16, bloomDecay: 0.5, color: "#9fe8ff", ability: "focus", burst: 3, burstGap: 0.05 },
+  shotgun: { name: "Shotgun",   mode: "shotgun", mag: 2, reload: 1.5, fireCd: 0.55, projSpeed: 11, dmg: 5,  projR: 5, life: 0.40, knock: 2.4, bloomAdd: 0, bloomMax: 0, bloomDecay: 1, color: "#ffd33d", ability: "grapple", pellets: 7, spread: 0.5 },
+  rail:    { name: "Railshot",  mode: "charge",  mag: 2, reload: 1.4, fireCd: 0.25, projSpeed: 24, dmg: 32, projR: 6, life: 0.8, knock: 1.6, bloomAdd: 0, bloomMax: 0, bloomDecay: 1, color: "#ff3d81", ability: "blink", chargeTime: 0.85, slowMul: 0.45, pierce: true },
+  disc:    { name: "Boomerang", mode: "disc",    mag: 1, reload: 0,   fireCd: 0.22, projSpeed: 9,  dmg: 13, projR: 11, life: 2.2, knock: 1.0, bloomAdd: 0, bloomMax: 0, bloomDecay: 1, color: "#27e08a", ability: "recall", returnT: 0.6 },
+};
+const WEAPON_KEYS = Object.keys(WEAPONS);
+const BOT_WEAPONS = ["shotgun", "rail", "blaster", "burst", "disc"];
+function curWeapon(e) { return WEAPONS[e.weapon] || WEAPONS.blaster; }
+
+// Dash rework: brief i-frames + end lag so dashes are a timing skill.
+const DASH_ACTIVE = 0.18, DASH_IFRAME = 0.15, DASH_ENDLAG = 0.12, DASH_SPEED = 15, DASH_REFUND = 0.6;
+
+/* ===========================================================================
    ROOMS
    =========================================================================== */
 const rooms = new Map();   // code -> room
@@ -56,7 +77,7 @@ function send(ws, obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o
 function broadcast(room, obj) { for (const p of room.players.values()) send(p.ws, obj); }
 
 function playerList(room) {
-  return [...room.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, host: p.id === room.hostId }));
+  return [...room.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, weapon: p.weapon || "blaster", host: p.id === room.hostId }));
 }
 function sendLobby(room) {
   broadcast(room, { t: "lobby", code: room.code, players: playerList(room), fillBots: room.fillBots });
@@ -80,11 +101,23 @@ function makeEntity(opts) {
     x: opts.x, y: opts.y, vx: 0, vy: 0, r: 18, angle: 0,
     maxHp: opts.maxHp || 100, hp: opts.maxHp || 100,
     score: 0, kos: 0, dead: false, respawn: 0, lives: LIVES, eliminated: false,
-    dashTimer: 0, shootTimer: 0, dashV: 0, dashDx: 0, dashDy: 0, dashCd: opts.dashCd || 2.5,
+    dashTimer: 0, dashV: 0, dashDx: 0, dashDy: 0, dashCd: opts.dashCd || 2.5,
+    dashActive: 0, dashIFrame: 0, dashEndLag: 0,           // dash rework
+    weapon: opts.weapon || "blaster",
+    ammo: 0, reloadT: 0, fireCd: 0, bloom: 0,              // ammo / reload / spread
+    burstLeft: 0, burstT: 0,                               // burst sequencing
+    charging: false, chargeT: 0,                           // railshot charge
+    discOut: false, prevShoot: false,
     buffs: { speed: 0, rapid: 0 }, holdStreak: 0,
-    aiState: { dashCd: Math.random() * 2 },
-    input: { mvx: 0, mvy: 0, angle: 0, shoot: false, dash: false },
+    aiState: { dashCd: Math.random() * 2, fireBias: Math.random() },
+    input: { mvx: 0, mvy: 0, angle: 0, shoot: false, dash: false, reload: false },
   };
+}
+// (re)initialise a fighter's weapon state — called on spawn and respawn.
+function resetWeapon(e) {
+  const w = curWeapon(e);
+  e.ammo = w.mag; e.reloadT = 0; e.fireCd = 0; e.bloom = 0;
+  e.burstLeft = 0; e.burstT = 0; e.charging = false; e.chargeT = 0; e.discOut = false; e.prevShoot = false;
 }
 function entSpeed(e) { const base = e.isBot ? 2.6 * BOT_DIFF : (e.stats ? e.stats.speed : 3); return base * (e.buffs.speed > 0 ? 1.6 : 1); }
 function entKnock(e) { return e.isBot ? 1.0 : (e.stats ? e.stats.knock : 1.0); }
@@ -114,6 +147,7 @@ function startGame(room) {
     mode, obstacles: genObstacles(), entities: [], projectiles: [], powerups: [],
     zone: { x: 0, y: 0, r: 90, baseR: 90, timer: 12, maxTimer: 12 },
     time: MATCH_TIME, puTimer: 6, over: false, countdown: 3,   // 3s pre-game: positions shown, sim frozen
+    projId: 1, events: [],
   };
   // humans
   let i = 0;
@@ -121,6 +155,7 @@ function startGame(room) {
     const a = (i / TOTAL_SLOTS) * Math.PI * 2;
     g.entities.push(makeEntity({
       id: p.id, name: p.name, color: p.color, stats: p.stats, hat: p.hat, back: p.back,
+      weapon: WEAPON_KEYS.includes(p.weapon) ? p.weapon : "blaster",
       maxHp: p.stats ? p.stats.maxHp : 100, dashCd: p.stats ? p.stats.dashCd : 2.5,
       x: Math.cos(a) * 200, y: Math.sin(a) * 200,
     }));
@@ -134,10 +169,12 @@ function startGame(room) {
       g.entities.push(makeEntity({
         id: "bot" + b, name: BOT_NAMES[b % 5], color: BOT_COLORS[b % 5], isBot: true,
         hat: BOT_HATS[b % BOT_HATS.length], back: BOT_BACKS[b % BOT_BACKS.length],
+        weapon: BOT_WEAPONS[b % BOT_WEAPONS.length],
         x: Math.cos(a) * 200, y: Math.sin(a) * 200,
       }));
     }
   }
+  g.entities.forEach(resetWeapon);
   g.startCount = g.entities.length;
   room.game = g;
   moveZone(g);
@@ -155,18 +192,102 @@ function moveZone(g) {
   }
   g.zone.timer = 10 + Math.random() * 5; g.zone.maxTimer = g.zone.timer; g.zone.baseR = 90; g.zone.r = 90;
 }
-function shoot(g, e, tx, ty, spread) {
-  if (e.shootTimer > 0) return;
-  e.shootTimer = entShootInt(e);
-  let a = Math.atan2(ty - e.y, tx - e.x); if (spread) a += (Math.random() - 0.5) * spread;
-  const spd = 9;
-  g.projectiles.push({ x: e.x + Math.cos(a) * e.r, y: e.y + Math.sin(a) * e.r, dx: Math.cos(a) * spd, dy: Math.sin(a) * spd, r: 7, life: 1.2, ownerId: e.id, knock: entKnock(e), color: e.isBot ? "#ff8080" : "#ffffff", dead: false });
-  e.vx -= Math.cos(a) * 0.4 * entKnock(e); e.vy -= Math.sin(a) * 0.4 * entKnock(e);
+// ---- weapon firing ----------------------------------------------------------
+function spawnProj(g, e, a, opt) {
+  const w = curWeapon(e);
+  g.projectiles.push(Object.assign({
+    id: g.projId++, x: e.x + Math.cos(a) * e.r, y: e.y + Math.sin(a) * e.r,
+    dx: Math.cos(a) * w.projSpeed, dy: Math.sin(a) * w.projSpeed,
+    r: w.projR, life: w.life, ownerId: e.id, weapon: e.weapon, color: w.color,
+    dmg: w.dmg, knock: w.knock * entKnock(e), pierce: !!w.pierce, disc: false,
+    hitSet: [], dead: false,
+  }, opt || {}));
 }
+function fireOnce(g, e, angle) {           // a single shot honoring current bloom
+  const bl = Math.min(e.bloom, curWeapon(e).bloomMax);
+  spawnProj(g, e, angle + (Math.random() - 0.5) * bl);
+  e.bloom = Math.min(curWeapon(e).bloomMax, e.bloom + curWeapon(e).bloomAdd);
+  e.vx -= Math.cos(angle) * 0.4 * entKnock(e); e.vy -= Math.sin(angle) * 0.4 * entKnock(e);
+}
+function doFire(g, e, angle) {              // edge-triggered fire for non-charge weapons
+  const w = curWeapon(e);
+  if (w.mode === "shotgun") {
+    for (let i = 0; i < w.pellets; i++) spawnProj(g, e, angle + (Math.random() - 0.5) * w.spread);
+    e.ammo--; e.fireCd = w.fireCd;
+    e.vx -= Math.cos(angle) * 1.6 * entKnock(e); e.vy -= Math.sin(angle) * 1.6 * entKnock(e);
+  } else if (w.mode === "disc") {
+    spawnProj(g, e, angle, { disc: true, age: 0, returning: false });
+    e.discOut = true; e.fireCd = w.fireCd;
+  } else if (w.mode === "burst") {
+    e.burstLeft = w.burst; e.burstT = 0; e.ammo--; e.fireCd = w.fireCd;
+  } else { // semi
+    fireOnce(g, e, angle); e.ammo--; e.fireCd = w.fireCd;
+  }
+  pushEvent(g, "shot", e.x, e.y, e.weapon);
+}
+function fireRail(g, e, angle, ratio) {     // charged piercing shot, damage scales with charge
+  const w = curWeapon(e);
+  spawnProj(g, e, angle, { dmg: Math.round(w.dmg * (0.5 + 0.5 * ratio)), knock: w.knock * entKnock(e) * (0.6 + 0.6 * ratio) });
+  e.vx -= Math.cos(angle) * 1.0 * entKnock(e); e.vy -= Math.sin(angle) * 1.0 * entKnock(e);
+  pushEvent(g, "rail", e.x, e.y);
+}
+function canFire(e) {
+  const w = curWeapon(e);
+  if (e.fireCd > 0 || e.reloadT > 0 || e.dashEndLag > 0 || e.burstLeft > 0) return false;
+  return w.mode === "disc" ? !e.discOut : e.ammo > 0;
+}
+function tryReload(e) {
+  const w = curWeapon(e);
+  if (w.mode === "disc" || e.reloadT > 0 || e.charging || e.burstLeft > 0 || e.ammo >= w.mag) return;
+  e.reloadT = w.reload;
+}
+// ---- dash rework: i-frames + end lag ----
 function dash(e, dx, dy) {
-  if (e.dashTimer > 0) return;
+  if (e.dashTimer > 0 || e.dashActive > 0 || e.dashEndLag > 0 || e.charging) return;
   const len = Math.hypot(dx, dy) || 1;
-  e.dashTimer = e.dashCd; e.dashV = 14; e.dashDx = dx / len; e.dashDy = dy / len;
+  e.dashTimer = e.dashCd; e.dashActive = DASH_ACTIVE; e.dashIFrame = DASH_IFRAME;
+  e.dashV = DASH_SPEED; e.dashDx = dx / len; e.dashDy = dy / len;
+}
+function pushEvent(g, type, x, y, extra) { if (g.events.length < 60) g.events.push({ type, x, y, extra }); }
+
+// per-entity cooldown / reload / burst / dash timers (runs every tick for living fighters)
+function stepTimers(g, e, dt) {
+  e.dashTimer = Math.max(0, e.dashTimer - dt);
+  e.dashIFrame = Math.max(0, e.dashIFrame - dt);
+  e.dashEndLag = Math.max(0, e.dashEndLag - dt);
+  if (e.dashActive > 0) { e.dashActive -= dt; if (e.dashActive <= 0) e.dashEndLag = DASH_ENDLAG; }
+  e.fireCd = Math.max(0, e.fireCd - dt);
+  e.buffs.speed = Math.max(0, e.buffs.speed - dt);
+  e.buffs.rapid = Math.max(0, e.buffs.rapid - dt);
+  if (e.bloom > 0) e.bloom = Math.max(0, e.bloom - curWeapon(e).bloomDecay * dt);
+  if (e.reloadT > 0) { e.reloadT -= dt; if (e.reloadT <= 0) { e.reloadT = 0; e.ammo = curWeapon(e).mag; pushEvent(g, "reloaddone", e.x, e.y, e.id); } }
+  if (e.burstLeft > 0) {
+    e.burstT -= dt;
+    if (e.burstT <= 0) { fireOnce(g, e, e.angle); e.burstLeft--; e.burstT = curWeapon(e).burstGap; if (e.burstLeft <= 0 && e.ammo <= 0) tryReload(e); }
+  }
+}
+// a human player's per-tick movement + firing, driven by their input
+function playerStep(g, e, dt) {
+  const inp = e.input, w = curWeapon(e);
+  e.angle = inp.angle;
+  if (e.dashEndLag <= 0) {                          // end lag locks movement briefly after a dash
+    const sp = entSpeed(e) * (e.charging ? (w.slowMul || 0.5) : 1);
+    e.vx += inp.mvx * sp * 0.25; e.vy += inp.mvy * sp * 0.25;
+    const cur = Math.hypot(e.vx, e.vy); if (cur > sp) { e.vx = e.vx / cur * sp; e.vy = e.vy / cur * sp; }
+  }
+  if (inp.dash) { dash(e, inp.mvx || Math.cos(inp.angle), inp.mvy || Math.sin(inp.angle)); inp.dash = false; }
+  if (inp.reload) { tryReload(e); inp.reload = false; }
+  if (w.mode === "charge") {                        // hold to charge, release to fire
+    if (inp.shoot && e.ammo > 0 && e.reloadT <= 0 && e.dashEndLag <= 0) { e.charging = true; e.chargeT = Math.min(w.chargeTime, e.chargeT + dt); }
+    else if (e.charging) {
+      if (e.chargeT >= w.chargeTime * 0.4) { fireRail(g, e, inp.angle, Math.min(1, e.chargeT / w.chargeTime)); e.ammo--; e.fireCd = w.fireCd; if (e.ammo <= 0) tryReload(e); }
+      e.charging = false; e.chargeT = 0;
+    }
+  } else {                                          // edge-triggered: holding fire does NOT auto-spam
+    const rising = inp.shoot && !e.prevShoot;
+    if (rising && canFire(e)) { doFire(g, e, inp.angle); if (e.ammo <= 0 && w.mode !== "disc" && e.burstLeft <= 0) tryReload(e); }
+  }
+  e.prevShoot = inp.shoot;
 }
 function damage(g, target, amount, srcId) {
   if (target.dead) return;
@@ -180,24 +301,42 @@ function damage(g, target, amount, srcId) {
   }
 }
 function runAI(g, e, dt) {
+  const w = curWeapon(e);
   let nearest = null, nd = 1e9;
   for (const o of g.entities) { if (o === e || o.dead) continue; const d = Math.hypot(o.x - e.x, o.y - e.y); if (d < nd) { nd = d; nearest = o; } }
+  // objective target: power-up if close, else the zone
   let gx = g.zone.x, gy = g.zone.y, bestPU = null, pd = 200;
   for (const p of g.powerups) { const d = Math.hypot(p.x - e.x, p.y - e.y); if (d < pd) { pd = d; bestPU = p; } }
   if (bestPU) { gx = bestPU.x; gy = bestPU.y; }
   else { const zd = Math.hypot(e.x - g.zone.x, e.y - g.zone.y); if (zd < g.zone.r - 20) { gx = g.zone.x + Math.sin(g.time * 2 + e.x) * 30; gy = g.zone.y + Math.cos(g.time * 2 + e.y) * 30; } }
+  // preferred range per weapon (shotgun closes, rail keeps distance)
+  const wantRange = w.mode === "shotgun" ? 150 : (w.mode === "rail" ? 330 : 270);
   const ga = Math.atan2(gy - e.y, gx - e.x); let ax = Math.cos(ga), ay = Math.sin(ga);
+  if (nearest && nd < wantRange * 0.6) { ax -= (nearest.x - e.x) / nd; ay -= (nearest.y - e.y) / nd; }   // back off if too close
+  if (e.hp < 30 && nearest) { ax -= (nearest.x - e.x) / nd * 1.5; ay -= (nearest.y - e.y) / nd * 1.5; }   // flee when low
   for (const o of g.obstacles) { const dx = e.x - o.x, dy = e.y - o.y, d = Math.hypot(dx, dy), reach = o.r + 72; if (d < reach && d > 0) { const f = (reach - d) / reach * 1.6; ax += dx / d * f; ay += dy / d * f; } }
   const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
-  const sp = entSpeed(e);
-  e.vx += ax * sp * 0.18; e.vy += ay * sp * 0.18;
-  const cur = Math.hypot(e.vx, e.vy); if (cur > sp) { e.vx = e.vx / cur * sp; e.vy = e.vy / cur * sp; }
-  if (nearest && nd < 360 && losClear(g, e.x, e.y, nearest.x, nearest.y)) {
+  if (e.dashEndLag <= 0) {
+    const sp = entSpeed(e) * (e.charging ? (w.slowMul || 0.5) : 1);
+    e.vx += ax * sp * 0.18; e.vy += ay * sp * 0.18;
+    const cur = Math.hypot(e.vx, e.vy); if (cur > sp) { e.vx = e.vx / cur * sp; e.vy = e.vy / cur * sp; }
+  }
+  if (w.mode !== "disc" && e.ammo <= 0 && e.burstLeft <= 0) tryReload(e);   // reload when empty
+  const inRange = nearest && nd < wantRange + 90 && losClear(g, e.x, e.y, nearest.x, nearest.y) && e.reloadT <= 0;
+  if (inRange) {
     e.angle = Math.atan2(nearest.y - e.y, nearest.x - e.x);
-    if (Math.random() < dt * 1.4 * BOT_DIFF) shoot(g, e, nearest.x, nearest.y, 0.35 / BOT_DIFF);
-  } else e.angle = Math.atan2(ay, ax);
+    if (w.mode === "charge") {
+      if (e.ammo > 0) { e.charging = true; e.chargeT += dt;
+        if (e.chargeT >= w.chargeTime) { fireRail(g, e, e.angle, 1); e.ammo--; e.fireCd = w.fireCd; e.charging = false; e.chargeT = 0; if (e.ammo <= 0) tryReload(e); } }
+    } else if (w.mode === "disc") {
+      if (!e.discOut && e.fireCd <= 0) doFire(g, e, e.angle);
+    } else if (canFire(e) && Math.random() < dt * (w.mode === "shotgun" ? 2.2 : 3.2) * BOT_DIFF) {
+      doFire(g, e, e.angle); if (e.ammo <= 0 && e.burstLeft <= 0) tryReload(e);
+    }
+  } else { e.angle = Math.atan2(ay, ax); if (e.charging) { e.charging = false; e.chargeT = 0; } }
+  // dash (dodge/reposition); bots inherit the same i-frame dodge as players
   e.aiState.dashCd -= dt;
-  if (e.aiState.dashCd <= 0 && e.dashTimer <= 0) {
+  if (e.aiState.dashCd <= 0 && e.dashTimer <= 0 && e.dashActive <= 0 && !e.charging) {
     e.aiState.dashCd = (2 + Math.random() * 3) / BOT_DIFF;
     if (e.hp < 35 && nearest) dash(e, e.x - nearest.x, e.y - nearest.y); else dash(e, gx - e.x, gy - e.y);
   }
@@ -219,6 +358,7 @@ function tickInner(room) {
   const dt = TICK;
   // pre-game countdown: hold the sim, keep broadcasting positions so players see the map
   if (g.countdown > 0) { g.countdown -= dt; broadcastState(room, g.countdown); return; }
+  g.events = [];   // per-tick feedback (dodge/reload/etc), sent to clients for floats/sound
   g.time -= dt;
   if (g.time <= 0) { g.time = 0; return endGame(room); }
 
@@ -236,23 +376,11 @@ function tickInner(room) {
     if (e.dead) {
       if (e.eliminated) continue;                 // out of lives — no respawn
       e.respawn -= dt;
-      if (e.respawn <= 0) { e.dead = false; e.hp = e.maxHp; const a = Math.random() * Math.PI * 2; e.x = Math.cos(a) * 120; e.y = Math.sin(a) * 120; e.vx = e.vy = 0; e.buffs.speed = e.buffs.rapid = 0; e.holdStreak = 0; }
+      if (e.respawn <= 0) { e.dead = false; e.hp = e.maxHp; const a = Math.random() * Math.PI * 2; e.x = Math.cos(a) * 120; e.y = Math.sin(a) * 120; e.vx = e.vy = 0; e.buffs.speed = e.buffs.rapid = 0; e.holdStreak = 0; resetWeapon(e); }
       continue;
     }
-    e.shootTimer = Math.max(0, e.shootTimer - dt);
-    e.dashTimer = Math.max(0, e.dashTimer - dt);
-    e.buffs.speed = Math.max(0, e.buffs.speed - dt);
-    e.buffs.rapid = Math.max(0, e.buffs.rapid - dt);
-
-    if (e.isBot) runAI(g, e, dt);
-    else {
-      const inp = e.input, sp = entSpeed(e);
-      e.vx += inp.mvx * sp * 0.25; e.vy += inp.mvy * sp * 0.25;
-      const cur = Math.hypot(e.vx, e.vy); if (cur > sp) { e.vx = e.vx / cur * sp; e.vy = e.vy / cur * sp; }
-      e.angle = inp.angle;
-      if (inp.shoot) shoot(g, e, e.x + Math.cos(inp.angle) * 100, e.y + Math.sin(inp.angle) * 100);
-      if (inp.dash) { dash(e, inp.mvx || Math.cos(inp.angle), inp.mvy || Math.sin(inp.angle)); inp.dash = false; }
-    }
+    stepTimers(g, e, dt);
+    if (e.isBot) runAI(g, e, dt); else playerStep(g, e, dt);
 
     if (e.dashV > 0) { e.x += e.dashDx * e.dashV; e.y += e.dashDy * e.dashV; e.dashV *= 0.82; if (e.dashV < 1) e.dashV = 0; }
     e.x += e.vx; e.y += e.vy; e.vx *= 0.86; e.vy *= 0.86;
@@ -278,19 +406,37 @@ function tickInner(room) {
   }
   g.powerups = g.powerups.filter(p => !p.dead);
 
-  // projectiles
+  // projectiles (weapon damage, piercing rail, returning disc, i-frame dodge)
   for (const p of g.projectiles) {
-    p.x += p.dx; p.y += p.dy; p.life -= dt;
-    if (p.life <= 0) { p.dead = true; continue; }
-    if (pointBlocked(g, p.x, p.y, p.r)) { p.dead = true; continue; }
-    for (const e of g.entities) {
-      if (e.id === p.ownerId || e.dead) continue;
-      if (Math.hypot(e.x - p.x, e.y - p.y) < e.r + p.r) {
-        const a = Math.atan2(p.dy, p.dx), force = 6 * p.knock;
-        e.vx += Math.cos(a) * force; e.vy += Math.sin(a) * force; e._lastHitBy = p.ownerId;
-        damage(g, e, PROJ_DMG, p.ownerId); p.dead = true; break;
+    if (p.disc) {
+      p.age += dt;
+      const owner = g.entities.find(en => en.id === p.ownerId);
+      if (!p.returning && p.age >= WEAPONS.disc.returnT) { p.returning = true; p.hitSet = []; }  // re-hit allowed on return
+      if (p.returning && owner && !owner.dead) {
+        const a = Math.atan2(owner.y - p.y, owner.x - p.x), spd = WEAPONS.disc.projSpeed * 1.15;
+        p.dx = Math.cos(a) * spd; p.dy = Math.sin(a) * spd;
+        if (Math.hypot(owner.x - p.x, owner.y - p.y) < owner.r + p.r) { p.dead = true; owner.discOut = false; }
       }
     }
+    p.x += p.dx; p.y += p.dy; p.life -= dt;
+    if (p.life <= 0) p.dead = true;
+    if (!p.dead && pointBlocked(g, p.x, p.y, p.r)) p.dead = true;
+    if (p.dead) { if (p.disc) { const o = g.entities.find(en => en.id === p.ownerId); if (o) o.discOut = false; } continue; }
+    for (const e of g.entities) {
+      if (e.id === p.ownerId || e.dead || p.hitSet.includes(e.id)) continue;
+      if (Math.hypot(e.x - p.x, e.y - p.y) < e.r + p.r) {
+        if (e.dashIFrame > 0) {                         // perfect dash dodge: no damage, refund a little cooldown
+          p.hitSet.push(e.id); pushEvent(g, "dodge", e.x, e.y, e.id);
+          e.dashTimer = Math.max(0, e.dashTimer - DASH_REFUND); continue;
+        }
+        const a = Math.atan2(p.dy, p.dx), force = 6 * p.knock;
+        e.vx += Math.cos(a) * force; e.vy += Math.sin(a) * force; e._lastHitBy = p.ownerId;
+        damage(g, e, p.dmg, p.ownerId);
+        if (p.pierce || p.disc) p.hitSet.push(e.id);   // rail pierces; disc hits each target once per leg
+        else { p.dead = true; break; }
+      }
+    }
+    if (p.dead && p.disc) { const o = g.entities.find(en => en.id === p.ownerId); if (o) o.discOut = false; }
   }
   g.projectiles = g.projectiles.filter(p => !p.dead);
 
@@ -311,10 +457,18 @@ function broadcastState(room, countdown) {
   broadcast(room, {
     t: "state", time: g.time, mode: g.mode, over: false, countdown: Math.ceil(countdown || 0),
     zone: { x: g.zone.x, y: g.zone.y, r: g.zone.r },
-    entities: g.entities.map(e => ({ id: e.id, name: e.name, color: e.color, hat: e.hat, back: e.back, x: e.x, y: e.y, r: e.r, angle: e.angle, hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, lives: e.lives, eliminated: e.eliminated, buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd })),
-    projectiles: g.projectiles.map(p => ({ x: p.x, y: p.y, r: p.r, ownerId: p.ownerId, color: p.color })),
+    entities: g.entities.map(e => { const w = curWeapon(e); return {
+      id: e.id, name: e.name, color: e.color, hat: e.hat, back: e.back, x: e.x, y: e.y, r: e.r, angle: e.angle,
+      hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, lives: e.lives, eliminated: e.eliminated,
+      buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd, iframe: e.dashIFrame > 0,
+      weapon: e.weapon, ammo: e.ammo, mag: w.mag, reloadF: e.reloadT > 0 ? e.reloadT / w.reload : 0, discOut: e.discOut,
+      charging: e.charging, chargeF: e.charging ? Math.min(1, e.chargeT / (w.chargeTime || 1)) : 0,
+    }; }),
+    projectiles: g.projectiles.map(p => ({ x: p.x, y: p.y, r: p.r, ownerId: p.ownerId, color: p.color, weapon: p.weapon, disc: !!p.disc })),
     powerups: g.powerups.map(p => ({ x: p.x, y: p.y, r: p.r, type: p.type, life: p.life })),
+    events: g.events,
   });
+  g.events = [];
 }
 
 function endGame(room) {
@@ -350,7 +504,7 @@ wss.on("connection", (ws) => {
       const code = makeCode();
       const id = "p" + (idCounter++);
       const room = { code, hostId: id, fillBots: true, players: new Map(), game: null, loop: null };
-      room.players.set(id, { id, name: (m.name || "Host").slice(0, 14), color: m.color || "#00e5ff", hat: m.hat || "none", back: m.back || "none", stats: m.stats || null, ws });
+      room.players.set(id, { id, name: (m.name || "Host").slice(0, 14), color: m.color || "#00e5ff", hat: m.hat || "none", back: m.back || "none", weapon: WEAPON_KEYS.includes(m.weapon) ? m.weapon : "blaster", stats: m.stats || null, ws });
       rooms.set(code, room);
       d.id = id; d.room = room;
       send(ws, { t: "created", code, youId: id, players: playerList(room), fillBots: room.fillBots });
@@ -363,7 +517,7 @@ wss.on("connection", (ws) => {
       if (room.game) { send(ws, { t: "error", msg: "Match already in progress" }); return; }
       if (room.players.size >= TOTAL_SLOTS) { send(ws, { t: "error", msg: "Room is full" }); return; }
       const id = "p" + (idCounter++);
-      room.players.set(id, { id, name: (m.name || "Player").slice(0, 14), color: m.color || "#27e08a", hat: m.hat || "none", back: m.back || "none", stats: m.stats || null, ws });
+      room.players.set(id, { id, name: (m.name || "Player").slice(0, 14), color: m.color || "#27e08a", hat: m.hat || "none", back: m.back || "none", weapon: WEAPON_KEYS.includes(m.weapon) ? m.weapon : "blaster", stats: m.stats || null, ws });
       d.id = id; d.room = room;
       send(ws, { t: "joined", code: room.code, youId: id, players: playerList(room), fillBots: room.fillBots });
       sendLobby(room);
@@ -375,6 +529,7 @@ wss.on("connection", (ws) => {
 
     if (m.t === "setbots" && d.id === room.hostId) { room.fillBots = !!m.fill; sendLobby(room); }
     else if (m.t === "setcolor" && !room.game) { const p = room.players.get(d.id); if (p && typeof m.color === "string") { p.color = m.color.slice(0, 9); sendLobby(room); } }
+    else if (m.t === "setweapon" && !room.game) { const p = room.players.get(d.id); if (p && WEAPON_KEYS.includes(m.weapon)) { p.weapon = m.weapon; sendLobby(room); } }
     else if ((m.t === "start" || m.t === "rematch") && d.id === room.hostId && !room.game) { startGame(room); }
     else if (m.t === "input" && room.game) {
       const p = room.players.get(d.id);
@@ -382,6 +537,7 @@ wss.on("connection", (ws) => {
         e.input.mvx = clamp(m.mvx); e.input.mvy = clamp(m.mvy);
         e.input.angle = +m.angle || 0; e.input.shoot = !!m.shoot;
         if (m.dash) e.input.dash = true;
+        if (m.reload) e.input.reload = true;
       }
     }
     else if (m.t === "leave") { leave(ws); }

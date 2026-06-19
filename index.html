@@ -121,6 +121,7 @@ body{
       <button class="btn secondary" onclick="show('achScreen');renderAchievements()">🏆 ACHIEVEMENTS</button>
       <button class="btn secondary" onclick="show('settingsScreen')">⚙ SETTINGS</button>
     </div>
+    <div id="weaponPicks" style="margin:6px 0 16px;"></div>
     <button id="dailyBtn" class="btn pink" style="margin-bottom:20px;" onclick="claimDaily()">🎁 DAILY REWARD</button>
     <div class="xpbar"><div id="menuXp"></div></div>
     <div class="stat-row">
@@ -217,6 +218,7 @@ body{
     <div id="roomCode"></div>
     <div id="roomPlayers" style="text-align:left;margin-bottom:16px;"></div>
     <div id="colorPicker" style="margin-bottom:16px;"></div>
+    <div id="lobbyWeaponPicks" style="margin-bottom:16px;"></div>
     <div id="hostControls"></div>
     <div id="waitMsg" class="small-muted"></div>
     <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px;">
@@ -246,6 +248,8 @@ body{
           <div class="bar"><div id="hudHp" style="background:linear-gradient(90deg,#27e08a,#9cff6e);width:100%;"></div></div></div>
         <div class="bar-wrap"><div class="bar-label">Dash</div>
           <div class="bar" style="width:120px;"><div id="hudDash" style="background:linear-gradient(90deg,#00e5ff,#7c5cff);width:100%;"></div></div></div>
+        <div class="bar-wrap"><div class="bar-label" id="hudWeapon">Blaster</div>
+          <div id="hudAmmo" style="font-size:17px;font-weight:800;letter-spacing:2px;min-height:20px;color:var(--gold);"></div></div>
       </div>
       <button id="leaveGameBtn" class="btn small secondary" style="position:absolute;bottom:18px;left:18px;pointer-events:auto;" onclick="quitToMenu()">⏏ Leave</button>
       <div id="countdown" style="position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-size:120px;font-weight:900;color:var(--accent);text-shadow:0 0 44px rgba(0,229,255,.6);display:none;pointer-events:none;"></div>
@@ -434,6 +438,7 @@ function toast(msg){
 function renderShop(){ setCoinTags(); }
 
 function renderMenu(){
+  renderWeaponPicks();
   document.getElementById("sCoins").textContent=fmt(save.coins);
   document.getElementById("sLevel").textContent=save.level;
   document.getElementById("sWins").textContent=save.wins;
@@ -575,6 +580,12 @@ const SFX={
   zone:()=>beep(440,0.12,"triangle",0.05,620),
   win:()=>{beep(523,0.15,"sine",0.08);setTimeout(()=>beep(659,0.15,"sine",0.08),120);setTimeout(()=>beep(784,0.28,"sine",0.08),240);},
   lose:()=>beep(330,0.25,"sawtooth",0.07,150),
+  // skill-combat cues
+  shootW:(wk)=>{ const f={blaster:620,burst:760,shotgun:240,disc:520}[wk]||620;
+    if(wk==="shotgun") beep(f,0.12,"sawtooth",0.06,90); else beep(f,0.06,"square",0.04,f*0.7); },
+  rail:()=>{ beep(220,0.28,"sawtooth",0.08,1200); },
+  reload:()=>{ beep(330,0.07,"square",0.05); setTimeout(()=>beep(560,0.08,"square",0.05),90); },
+  dodge:()=>{ beep(950,0.12,"sine",0.06,1400); },
 };
 
 /* ===========================================================================
@@ -584,7 +595,7 @@ const keys={}; const mouse={x:0,y:0,down:false};
 const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints>0;
 // touch joystick state
 const touch={ move:{active:false,id:null,ox:0,oy:0,dx:0,dy:0},
-              aim:{active:false,id:null,ang:0,shoot:false}, dashReq:false };
+              aim:{active:false,id:null,ang:0,shoot:false}, dashReq:false, reloadReq:false };
 
 window.addEventListener("keydown",e=>{ initAudio(); keys[e.key.toLowerCase()]=true; if(e.key===" ") e.preventDefault(); });
 window.addEventListener("keyup",e=>{ keys[e.key.toLowerCase()]=false; });
@@ -599,12 +610,15 @@ canvas.addEventListener("contextmenu",e=>e.preventDefault());
 
 // --- touch: left half = move joystick, right half = aim+shoot, dash button bottom-center ---
 function dashBtn(){ return {x:canvas.width/2, y:canvas.height-72, r:46}; }
+function reloadBtn(){ return {x:canvas.width/2+120, y:canvas.height-72, r:38}; }
 function inDashBtn(p){ const b=dashBtn(); return Math.hypot(p.x-b.x,p.y-b.y)<b.r; }
+function inReloadBtn(p){ const b=reloadBtn(); return Math.hypot(p.x-b.x,p.y-b.y)<b.r; }
 canvas.addEventListener("touchstart",e=>{
   initAudio(); e.preventDefault();
   for(const t of e.changedTouches){
     const p=cpos(t.clientX,t.clientY);
     if(inDashBtn(p)){ touch.dashReq=true; continue; }
+    if(inReloadBtn(p)){ touch.reloadReq=true; continue; }
     if(p.x<canvas.width/2){ if(!touch.move.active) touch.move={active:true,id:t.identifier,ox:p.x,oy:p.y,dx:0,dy:0}; }
     else if(!touch.aim.active){ touch.aim={active:true,id:t.identifier,ang:0,shoot:false}; }
   }
@@ -664,6 +678,31 @@ const POWERUP_TYPES = {
 };
 let G=null;
 
+/* ===========================================================================
+   SKILL COMBAT — weapon table.  *** KEEP IDENTICAL TO server.js WEAPONS ***
+   =========================================================================== */
+const WEAPONS = {
+  blaster: { name:"Blaster",   mode:"semi",    mag:6, reload:1.1, fireCd:0.20, projSpeed:10, dmg:14, projR:7, life:1.1, knock:1.0, bloomAdd:0.05, bloomMax:0.20, bloomDecay:0.6, color:"#ffffff", ability:"power" },
+  burst:   { name:"Burst Rifle", mode:"burst", mag:4, reload:1.3, fireCd:0.46, projSpeed:13, dmg:8,  projR:5, life:1.0, knock:0.6, bloomAdd:0.04, bloomMax:0.16, bloomDecay:0.5, color:"#9fe8ff", ability:"focus", burst:3, burstGap:0.05 },
+  shotgun: { name:"Shotgun",   mode:"shotgun", mag:2, reload:1.5, fireCd:0.55, projSpeed:11, dmg:5,  projR:5, life:0.40, knock:2.4, bloomAdd:0, bloomMax:0, bloomDecay:1, color:"#ffd33d", ability:"grapple", pellets:7, spread:0.5 },
+  rail:    { name:"Railshot",  mode:"charge",  mag:2, reload:1.4, fireCd:0.25, projSpeed:24, dmg:32, projR:6, life:0.8, knock:1.6, bloomAdd:0, bloomMax:0, bloomDecay:1, color:"#ff3d81", ability:"blink", chargeTime:0.85, slowMul:0.45, pierce:true },
+  disc:    { name:"Boomerang", mode:"disc",    mag:1, reload:0,   fireCd:0.22, projSpeed:9,  dmg:13, projR:11, life:2.2, knock:1.0, bloomAdd:0, bloomMax:0, bloomDecay:1, color:"#27e08a", ability:"recall", returnT:0.6 },
+};
+const WEAPON_KEYS = Object.keys(WEAPONS);
+const BOT_WEAPONS = ["shotgun","rail","blaster","burst","disc"];
+// UI descriptions for the weapon-select screens
+const WEAPON_UI = [
+  { key:"blaster", icon:"🔫", blurb:"Balanced semi-auto. 6 ammo. Click to fire — reliable all-rounder." },
+  { key:"burst",   icon:"🎯", blurb:"3-round bursts, 4 bursts/mag. Rewards tracking your target." },
+  { key:"shotgun", icon:"💥", blurb:"2 shells, close-range cone, big knockback. Slow reload." },
+  { key:"rail",    icon:"⚡", blurb:"Hold to charge, release to fire a fast piercing shot. Slows you while charging." },
+  { key:"disc",    icon:"🪃", blurb:"One disc out at a time — hits going out AND on the way back." },
+];
+function curWeapon(e){ return WEAPONS[e.weapon] || WEAPONS.blaster; }
+function myWeapon(){ const w=localStorage.getItem("rr_weapon"); return WEAPON_KEYS.includes(w)?w:"blaster"; }
+// Dash rework constants (identical to server)
+const DASH_ACTIVE=0.18, DASH_IFRAME=0.15, DASH_ENDLAG=0.12, DASH_SPEED=15, DASH_REFUND=0.6;
+
 class Entity{
   constructor(x,y,color,name,isPlayer){
     this.x=x;this.y=y;this.vx=0;this.vy=0;this.r=18;
@@ -671,8 +710,11 @@ class Entity{
     this.diff=1;                          // bot difficulty multiplier (1 for player)
     this.maxHp=isPlayer?statVal("health"):100; this.hp=this.maxHp;
     this.score=0;this.kos=0;this.dead=false;this.respawn=0;this.lives=LIVES;this.eliminated=false;this.hat="none";this.back="none";
-    this.angle=0;this.dashTimer=0;this.shootTimer=0;
+    this.angle=0;this.dashTimer=0;
     this.dashV=0;this.dashDx=0;this.dashDy=0;
+    this.dashActive=0;this.dashIFrame=0;this.dashEndLag=0;          // dash rework
+    this.weapon="blaster";this.ammo=0;this.reloadT=0;this.fireCd=0;this.bloom=0;  // ammo/reload/spread
+    this.burstLeft=0;this.burstT=0;this.charging=false;this.chargeT=0;this.discOut=false;this.prevShoot=false;
     this.trail=[]; this.aiState={dashCd:Math.random()*2};
     this.buffs={speed:0,rapid:0};         // remaining seconds of each buff
     this.holdStreak=0;                    // continuous time inside zone (koth mode)
@@ -727,20 +769,40 @@ function genObstacles(){
   return obs;
 }
 
-function entityShoot(e,tx,ty,spread){
-  if(e.shootTimer>0) return;
-  e.shootTimer=e.shootInterval;
-  let a=Math.atan2(ty-e.y,tx-e.x); if(spread) a+=(Math.random()-0.5)*spread;
-  const spd=9;
-  G.projectiles.push(new Projectile(e.x+Math.cos(a)*e.r, e.y+Math.sin(a)*e.r, Math.cos(a)*spd, Math.sin(a)*spd, e));
-  e.vx-=Math.cos(a)*0.4*e.knock; e.vy-=Math.sin(a)*0.4*e.knock;
-  if(e.isPlayer) SFX.shoot();
+/* ---- SKILL COMBAT helpers (mirror server.js; single-player runs these locally) ---- */
+function resetWeapon(e){ const w=curWeapon(e); e.ammo=w.mag; e.reloadT=0; e.fireCd=0; e.bloom=0; e.burstLeft=0; e.burstT=0; e.charging=false; e.chargeT=0; e.discOut=false; e.prevShoot=false; }
+function spawnProj(e,a,opt){
+  const w=curWeapon(e);
+  const base={ x:e.x+Math.cos(a)*e.r, y:e.y+Math.sin(a)*e.r, dx:Math.cos(a)*w.projSpeed, dy:Math.sin(a)*w.projSpeed,
+    r:w.projR, life:w.life, owner:e, weapon:e.weapon,
+    color: e.isPlayer ? (e.weapon==="blaster"?equippedCos("projectile").value:w.color) : w.color,
+    dmg:w.dmg, knock:w.knock*e.knock, pierce:!!w.pierce, disc:false, hitSet:[], dead:false };
+  G.projectiles.push(Object.assign(base,opt||{}));
 }
-function entityDash(e,dx,dy){
-  if(e.dashTimer>0) return;
-  const len=Math.hypot(dx,dy)||1;
-  e.dashTimer=e.dashCd; e.dashV=14; e.dashDx=dx/len; e.dashDy=dy/len;
-  spawnParticles(e.x,e.y,e.color,12); if(e.isPlayer) SFX.dash();
+function fireOnce(e,a){ const w=curWeapon(e); const bl=Math.min(e.bloom,w.bloomMax); spawnProj(e,a+(Math.random()-0.5)*bl); e.bloom=Math.min(w.bloomMax,e.bloom+w.bloomAdd); e.vx-=Math.cos(a)*0.4*e.knock; e.vy-=Math.sin(a)*0.4*e.knock; }
+function doFire(e,a){ const w=curWeapon(e);
+  if(w.mode==="shotgun"){ for(let i=0;i<w.pellets;i++) spawnProj(e,a+(Math.random()-0.5)*w.spread); e.ammo--; e.fireCd=w.fireCd; e.vx-=Math.cos(a)*1.6*e.knock; e.vy-=Math.sin(a)*1.6*e.knock; }
+  else if(w.mode==="disc"){ spawnProj(e,a,{disc:true,age:0,returning:false}); e.discOut=true; e.fireCd=w.fireCd; }
+  else if(w.mode==="burst"){ e.burstLeft=w.burst; e.burstT=0; e.ammo--; e.fireCd=w.fireCd; }
+  else { fireOnce(e,a); e.ammo--; e.fireCd=w.fireCd; }
+  if(e.isPlayer) SFX.shootW(e.weapon);
+}
+function fireRail(e,a,ratio){ const w=curWeapon(e); spawnProj(e,a,{dmg:Math.round(w.dmg*(0.5+0.5*ratio)),knock:w.knock*e.knock*(0.6+0.6*ratio)}); e.vx-=Math.cos(a)*1.0*e.knock; e.vy-=Math.sin(a)*1.0*e.knock; if(e.isPlayer) SFX.rail(); }
+function canFire(e){ const w=curWeapon(e); if(e.fireCd>0||e.reloadT>0||e.dashEndLag>0||e.burstLeft>0) return false; return w.mode==="disc"? !e.discOut : e.ammo>0; }
+function tryReload(e){ const w=curWeapon(e); if(w.mode==="disc"||e.reloadT>0||e.charging||e.burstLeft>0||e.ammo>=w.mag) return; e.reloadT=w.reload; }
+function dashStart(e,dx,dy){
+  if(e.dashTimer>0||e.dashActive>0||e.dashEndLag>0||e.charging) return;
+  const len=Math.hypot(dx,dy)||1; e.dashTimer=e.dashCd; e.dashActive=DASH_ACTIVE; e.dashIFrame=DASH_IFRAME;
+  e.dashV=DASH_SPEED; e.dashDx=dx/len; e.dashDy=dy/len; spawnParticles(e.x,e.y,e.color,10); if(e.isPlayer) SFX.dash();
+}
+function stepTimers(e,dt){
+  e.dashTimer=Math.max(0,e.dashTimer-dt); e.dashIFrame=Math.max(0,e.dashIFrame-dt); e.dashEndLag=Math.max(0,e.dashEndLag-dt);
+  if(e.dashActive>0){ e.dashActive-=dt; if(e.dashActive<=0) e.dashEndLag=DASH_ENDLAG; }
+  e.fireCd=Math.max(0,e.fireCd-dt);
+  e.buffs.speed=Math.max(0,e.buffs.speed-dt); e.buffs.rapid=Math.max(0,e.buffs.rapid-dt);
+  if(e.bloom>0) e.bloom=Math.max(0,e.bloom-curWeapon(e).bloomDecay*dt);
+  if(e.reloadT>0){ e.reloadT-=dt; if(e.reloadT<=0){ e.reloadT=0; e.ammo=curWeapon(e).mag; if(e.isPlayer) SFX.reload(); } }
+  if(e.burstLeft>0){ e.burstT-=dt; if(e.burstT<=0){ fireOnce(e,e.angle); e.burstLeft--; e.burstT=curWeapon(e).burstGap; if(e.burstLeft<=0&&e.ammo<=0) tryReload(e); } }
 }
 function damage(target,amount,src){
   if(target.dead) return;
@@ -792,38 +854,35 @@ function pickupPowerUp(e,p){
    8. AI
    =========================================================================== */
 function runAI(e,dt){
+  const w=curWeapon(e), diff=e.diff||1;
   let nearest=null,nd=1e9;
   for(const o of G.entities){ if(o===e||o.dead) continue; const d=Math.hypot(o.x-e.x,o.y-e.y); if(d<nd){nd=d;nearest=o;} }
-
-  // goal: nearest power-up if close, else the zone
-  let gx=G.zone.x, gy=G.zone.y;
-  let bestPU=null,pd=200;
+  let gx=G.zone.x, gy=G.zone.y, bestPU=null,pd=200;
   for(const p of G.powerups){ const d=Math.hypot(p.x-e.x,p.y-e.y); if(d<pd){ pd=d; bestPU=p; } }
   if(bestPU){ gx=bestPU.x; gy=bestPU.y; }
   else { const zd=Math.hypot(e.x-G.zone.x,e.y-G.zone.y);
     if(zd<G.zone.r-20){ gx=G.zone.x+Math.sin(G.time*2+e.x)*30; gy=G.zone.y+Math.cos(G.time*2+e.y)*30; } }
-
-  // steering = toward goal + repulsion from obstacles (navigates around cover)
+  // preferred range per weapon (shotgun closes; rail keeps distance)
+  const wantRange = w.mode==="shotgun"?150 : (w.mode==="rail"?330:270);
   const ga=Math.atan2(gy-e.y,gx-e.x); let ax=Math.cos(ga), ay=Math.sin(ga);
-  for(const o of G.obstacles){
-    const dx=e.x-o.x,dy=e.y-o.y,d=Math.hypot(dx,dy),reach=o.r+72;
-    if(d<reach&&d>0){ const f=(reach-d)/reach*1.6; ax+=dx/d*f; ay+=dy/d*f; }
-  }
+  if(nearest && nd<wantRange*0.6){ ax-=(nearest.x-e.x)/nd; ay-=(nearest.y-e.y)/nd; }
+  if(e.hp<30 && nearest){ ax-=(nearest.x-e.x)/nd*1.5; ay-=(nearest.y-e.y)/nd*1.5; }
+  for(const o of G.obstacles){ const dx=e.x-o.x,dy=e.y-o.y,d=Math.hypot(dx,dy),reach=o.r+72; if(d<reach&&d>0){ const f=(reach-d)/reach*1.6; ax+=dx/d*f; ay+=dy/d*f; } }
   const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al;
-  e.vx+=ax*e.speed*0.18; e.vy+=ay*e.speed*0.18;
-  const sp=Math.hypot(e.vx,e.vy); if(sp>e.speed){ e.vx=e.vx/sp*e.speed; e.vy=e.vy/sp*e.speed; }
-
-  // shoot at nearest enemy only with clear line of sight (no shooting through cover)
-  if(nearest && nd<360 && losClear(e.x,e.y,nearest.x,nearest.y)){
+  if(e.dashEndLag<=0){ const sp=e.speed*(e.charging?(w.slowMul||0.5):1); e.vx+=ax*sp*0.18; e.vy+=ay*sp*0.18; const cur=Math.hypot(e.vx,e.vy); if(cur>sp){ e.vx=e.vx/cur*sp; e.vy=e.vy/cur*sp; } }
+  if(w.mode!=="disc" && e.ammo<=0 && e.burstLeft<=0) tryReload(e);
+  const inRange = nearest && nd<wantRange+90 && losClear(e.x,e.y,nearest.x,nearest.y) && e.reloadT<=0;
+  if(inRange){
     e.angle=Math.atan2(nearest.y-e.y,nearest.x-e.x);
-    if(Math.random()<dt*1.4*e.diff) entityShoot(e,nearest.x,nearest.y, 0.35/e.diff); // accuracy scales with difficulty
-  } else e.angle=Math.atan2(ay,ax);
-
+    if(w.mode==="charge"){
+      if(e.ammo>0){ e.charging=true; e.chargeT+=dt; if(e.chargeT>=w.chargeTime){ fireRail(e,e.angle,1); e.ammo--; e.fireCd=w.fireCd; e.charging=false; e.chargeT=0; if(e.ammo<=0) tryReload(e);} }
+    } else if(w.mode==="disc"){ if(!e.discOut && e.fireCd<=0) doFire(e,e.angle); }
+    else if(canFire(e) && Math.random()<dt*(w.mode==="shotgun"?2.2:3.2)*diff){ doFire(e,e.angle); if(e.ammo<=0 && e.burstLeft<=0) tryReload(e); }
+  } else { e.angle=Math.atan2(ay,ax); if(e.charging){ e.charging=false; e.chargeT=0; } }
   e.aiState.dashCd-=dt;
-  if(e.aiState.dashCd<=0 && e.dashTimer<=0){
-    e.aiState.dashCd=(2+Math.random()*3)/e.diff;
-    if(e.hp<35 && nearest) entityDash(e, e.x-nearest.x, e.y-nearest.y); // flee when low
-    else entityDash(e, gx-e.x, gy-e.y);
+  if(e.aiState.dashCd<=0 && e.dashTimer<=0 && e.dashActive<=0 && !e.charging){
+    e.aiState.dashCd=(2+Math.random()*3)/diff;
+    if(e.hp<35 && nearest) dashStart(e, e.x-nearest.x, e.y-nearest.y); else dashStart(e, gx-e.x, gy-e.y);
   }
 }
 
@@ -843,15 +902,17 @@ function startMatch(){
   _cdPrev=-1; document.getElementById("countdown").style.display="none";
 
   const player=new Entity(cx, cy+150, equippedCos("character").value, "You", true);
-  player.hat=equippedCos("hat").value; player.back=equippedCos("back").value;
+  player.hat=equippedCos("hat").value; player.back=equippedCos("back").value; player.weapon=myWeapon();
   G.entities.push(player); G.player=player;
   const n=save.settings.bots;
   for(let i=0;i<n;i++){
     const a=(i/n)*Math.PI*2;
     const b=new Entity(cx+Math.cos(a)*200, cy+Math.sin(a)*200, BOT_COLORS[i%5], BOT_NAMES[i%5]);
     b.diff=G.diff; b.maxHp=100; b.hp=100; b.hat=BOT_HATS[i%BOT_HATS.length]; b.back=BOT_BACKS[i%BOT_BACKS.length];
+    b.weapon=BOT_WEAPONS[i%BOT_WEAPONS.length];
     G.entities.push(b);
   }
+  G.entities.forEach(resetWeapon);
   G.startCount=G.entities.length;
   moveZone();
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[mode].label+" · bots ×"+G.diff.toFixed(2);
@@ -926,13 +987,9 @@ function update(dt){
       if(e.eliminated) continue;                  // out of lives — no respawn
       e.respawn-=dt;
       if(e.respawn<=0){ e.dead=false; e.hp=e.maxHp; const a=Math.random()*Math.PI*2;
-        e.x=G.cx+Math.cos(a)*120; e.y=G.cy+Math.sin(a)*120; e.vx=e.vy=0; e.buffs.speed=e.buffs.rapid=0; e.holdStreak=0; }
+        e.x=G.cx+Math.cos(a)*120; e.y=G.cy+Math.sin(a)*120; e.vx=e.vy=0; e.buffs.speed=e.buffs.rapid=0; e.holdStreak=0; resetWeapon(e); }
       continue; }
-    e.shootTimer=Math.max(0,e.shootTimer-dt);
-    e.dashTimer=Math.max(0,e.dashTimer-dt);
-    e.buffs.speed=Math.max(0,e.buffs.speed-dt);
-    e.buffs.rapid=Math.max(0,e.buffs.rapid-dt);
-
+    stepTimers(e,dt);
     if(e.isPlayer) controlPlayer(e,dt); else runAI(e,dt);
 
     if(e.dashV>0){ e.x+=e.dashDx*e.dashV; e.y+=e.dashDy*e.dashV; e.dashV*=0.82; if(e.dashV<1) e.dashV=0; spawnParticles(e.x,e.y,e.color,1); }
@@ -964,17 +1021,31 @@ function update(dt){
   }
   G.powerups=G.powerups.filter(p=>!p.dead);
 
-  // projectiles
+  // projectiles (weapon damage, piercing rail, returning disc, i-frame dodge)
   for(const p of G.projectiles){
+    if(p.disc){
+      p.age+=dt; const owner=p.owner;
+      if(!p.returning && p.age>=WEAPONS.disc.returnT){ p.returning=true; p.hitSet=[]; }
+      if(p.returning && owner && !owner.dead){
+        const a=Math.atan2(owner.y-p.y,owner.x-p.x), spd=WEAPONS.disc.projSpeed*1.15;
+        p.dx=Math.cos(a)*spd; p.dy=Math.sin(a)*spd;
+        if(Math.hypot(owner.x-p.x,owner.y-p.y)<owner.r+p.r){ p.dead=true; owner.discOut=false; }
+      }
+    }
     p.x+=p.dx; p.y+=p.dy; p.life-=dt;
-    if(p.life<=0){ p.dead=true; continue; }
-    if(pointBlocked(p.x,p.y,p.r)){ p.dead=true; spawnParticles(p.x,p.y,p.color,4); continue; } // blocked by cover
-    for(const e of G.entities){ if(e===p.owner||e.dead) continue;
+    if(p.life<=0) p.dead=true;
+    if(!p.dead && pointBlocked(p.x,p.y,p.r)){ p.dead=true; spawnParticles(p.x,p.y,p.color,4); }
+    if(p.dead){ if(p.disc&&p.owner) p.owner.discOut=false; continue; }
+    for(const e of G.entities){ if(e===p.owner||e.dead||p.hitSet.includes(e)) continue;
       if(Math.hypot(e.x-p.x,e.y-p.y)<e.r+p.r){
+        if(e.dashIFrame>0){ p.hitSet.push(e); floatText(e.x,e.y-e.r-12,"DODGE!","#9ff0ff"); e.dashTimer=Math.max(0,e.dashTimer-DASH_REFUND); if(e.isPlayer) SFX.dodge(); continue; }
         const a=Math.atan2(p.dy,p.dx), force=6*p.knock;
         e.vx+=Math.cos(a)*force; e.vy+=Math.sin(a)*force; e._lastHitBy=p.owner;
-        damage(e,PROJ_DMG,p.owner); p.dead=true; break; }
+        damage(e,p.dmg,p.owner);
+        if(p.pierce||p.disc){ p.hitSet.push(e); } else { p.dead=true; break; }
+      }
     }
+    if(p.dead&&p.disc&&p.owner) p.owner.discOut=false;
   }
   G.projectiles=G.projectiles.filter(p=>!p.dead);
 
@@ -998,19 +1069,33 @@ function update(dt){
 }
 
 function controlPlayer(e,dt){
+  const w=curWeapon(e);
   let dx=0,dy=0;
   if(touch.move.active){ dx=touch.move.dx; dy=touch.move.dy; }
   else { if(keys["w"])dy-=1; if(keys["s"])dy+=1; if(keys["a"])dx-=1; if(keys["d"])dx+=1;
     const l=Math.hypot(dx,dy); if(l>0){ dx/=l; dy/=l; } }
-  e.vx+=dx*e.speed*0.25; e.vy+=dy*e.speed*0.25;
-  const sp=Math.hypot(e.vx,e.vy); if(sp>e.speed){ e.vx=e.vx/sp*e.speed; e.vy=e.vy/sp*e.speed; }
-
-  // aim + shoot
-  if(touch.aim.active){ e.angle=touch.aim.ang; if(touch.aim.shoot) entityShoot(e, e.x+Math.cos(e.angle)*100, e.y+Math.sin(e.angle)*100); }
-  else { const mwy=unprojY(mouse.y); e.angle=Math.atan2(mwy-e.y, mouse.x-e.x); if(mouse.down) entityShoot(e,mouse.x,mwy); }
-
+  // aim
+  if(touch.aim.active){ e.angle=touch.aim.ang; } else { const mwy=unprojY(mouse.y); e.angle=Math.atan2(mwy-e.y, mouse.x-e.x); }
+  // movement (locked during dash end lag, slowed while charging the railgun)
+  if(e.dashEndLag<=0){ const sp=e.speed*(e.charging?(w.slowMul||0.5):1); e.vx+=dx*sp*0.25; e.vy+=dy*sp*0.25;
+    const cur=Math.hypot(e.vx,e.vy); if(cur>sp){ e.vx=e.vx/cur*sp; e.vy=e.vy/cur*sp; } }
   // dash
-  if(keys[" "]||touch.dashReq){ entityDash(e, (dx||Math.cos(e.angle)), (dy||Math.sin(e.angle))); touch.dashReq=false; }
+  if(keys[" "]||touch.dashReq){ dashStart(e, (dx||Math.cos(e.angle)), (dy||Math.sin(e.angle))); touch.dashReq=false; }
+  // manual reload (R or touch button)
+  if(keys["r"]||touch.reloadReq){ tryReload(e); touch.reloadReq=false; keys["r"]=false; }
+  // firing
+  const shootHeld = touch.aim.active ? touch.aim.shoot : mouse.down;
+  if(w.mode==="charge"){
+    if(shootHeld && e.ammo>0 && e.reloadT<=0 && e.dashEndLag<=0){ e.charging=true; e.chargeT=Math.min(w.chargeTime,e.chargeT+dt); }
+    else if(e.charging){
+      if(e.chargeT>=w.chargeTime*0.4){ fireRail(e,e.angle,Math.min(1,e.chargeT/w.chargeTime)); e.ammo--; e.fireCd=w.fireCd; if(e.ammo<=0) tryReload(e); }
+      e.charging=false; e.chargeT=0;
+    }
+  } else {
+    const rising = shootHeld && !e.prevShoot;     // edge-triggered: holding fire does nothing extra
+    if(rising && canFire(e)){ doFire(e,e.angle); if(e.ammo<=0 && w.mode!=="disc" && e.burstLeft<=0) tryReload(e); }
+  }
+  e.prevShoot=shootHeld;
 }
 
 /* ===========================================================================
@@ -1023,6 +1108,14 @@ function updateHUD(){
   document.getElementById("hudCoins").textContent=G.coinsEarned;
   document.getElementById("hudHp").style.width=Math.max(0,G.player.hp/G.player.maxHp*100)+"%";
   document.getElementById("hudDash").style.width=Math.min(100,Math.max(0,100*(1-G.player.dashTimer/G.player.dashCd)))+"%";
+  // weapon + ammo / reload readout
+  const pw=curWeapon(G.player), pl=G.player;
+  document.getElementById("hudWeapon").textContent=pw.name;
+  const reloadingNow = pl.reloadF!=null ? pl.reloadF>0 : pl.reloadT>0;
+  const ammoEl=document.getElementById("hudAmmo");
+  if(pw.mode==="disc"){ ammoEl.textContent=pl.discOut?"◌ out":"● ready"; }
+  else if(reloadingNow){ ammoEl.innerHTML='<span style="color:var(--accent)">RELOADING…</span>'; }
+  else { const a=Math.max(0,pl.ammo|0); ammoEl.textContent="●".repeat(a)+"○".repeat(Math.max(0,pw.mag-a)); }
   const lead=[...G.entities].sort((a,b)=>b.score-a.score)[0];
   document.getElementById("hudObj").textContent=(lead===G.player?"You lead! ":lead.name+" leads. ")+ZONE_MODES[G.mode].obj;
   const ranked=[...G.entities].sort((a,b)=>(a.eliminated-b.eliminated)||(b.score-a.score));
@@ -1127,8 +1220,19 @@ function drawPillar(o){
 }
 function drawProjectile(p){
   const y=pY(p.y)-14;
-  ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=12;
-  ctx.beginPath(); ctx.arc(p.x,y,p.r,0,7); ctx.fill(); ctx.shadowBlur=0;
+  ctx.save(); ctx.shadowColor=p.color; ctx.shadowBlur=12;
+  if(p.disc){                                   // spinning boomerang ring
+    ctx.strokeStyle=p.color; ctx.lineWidth=p.r*0.45; const sp=Date.now()/40;
+    ctx.beginPath(); ctx.arc(p.x,y,p.r,sp,sp+4.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.x,y,p.r,sp+Math.PI,sp+Math.PI+1.2); ctx.stroke();
+  } else if(p.weapon==="rail"){                  // streaked piercing bolt
+    const a=Math.atan2(p.dy||0,p.dx||1);
+    ctx.strokeStyle=p.color; ctx.lineWidth=p.r*1.4; ctx.lineCap="round";
+    ctx.beginPath(); ctx.moveTo(p.x-Math.cos(a)*18,y-Math.sin(a)*18*TILT); ctx.lineTo(p.x,y); ctx.stroke();
+  } else {                                       // round shot
+    ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,y,p.r,0,7); ctx.fill();
+  }
+  ctx.restore();
 }
 function drawPowerUp(p){
   const t=POWERUP_TYPES[p.type], bob=Math.sin(Date.now()/300+p.x)*3;
@@ -1268,6 +1372,10 @@ function drawEntity(e){
   const pxv=-Math.sin(a), pyv=Math.cos(a)*TILT;     // perpendicular (projected)
   const legH=r*0.6, bodyH=r*1.05, headR=r*0.52;
   const hipY=gy-legH, bodyCY=hipY-bodyH*0.5, headCY=hipY-bodyH-headR*0.55;
+  // combat telegraph fractions (single-player has raw timers; online entities carry F/iframe)
+  const cf = e.chargeF!=null ? e.chargeF : (e.charging ? Math.min(1,(e.chargeT||0)/((curWeapon(e).chargeTime)||1)) : 0);
+  const rf = e.reloadF!=null ? e.reloadF : (e.reloadT>0 ? e.reloadT/((curWeapon(e).reload)||1) : 0);
+  const iframing = e.iframe!=null ? e.iframe : (e.dashIFrame>0);
 
   // trail on the ground
   const tcos=equippedCos("trail");
@@ -1280,6 +1388,9 @@ function drawEntity(e){
   // buff ring on the floor
   if(e.buffs&&(e.buffs.speed>0||e.buffs.rapid>0)){ ctx.strokeStyle=e.buffs.rapid>0?"#ff3d81":"#00e5ff"; ctx.lineWidth=2;
     ctx.beginPath(); ctx.ellipse(gx,gy,r+7,(r+7)*TILT,0,0,7); ctx.stroke(); }
+  // dash i-frame shimmer (invulnerable window)
+  if(iframing){ ctx.save(); ctx.globalAlpha=0.85; ctx.strokeStyle="#9ff0ff"; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.ellipse(gx,gy,r+5,(r+5)*TILT,0,0,7); ctx.stroke(); ctx.restore(); }
 
   // walk cycle — advance phase with movement
   const key=e.id||e.name, ws=walkState[key]||(walkState[key]={x:gx,y:gy,phase:0});
@@ -1313,6 +1424,14 @@ function drawEntity(e){
 
   if(!gunBehind) drawArmsGun(e,gx,bodyCY,fx,fy,pxv,pyv,handX,handY,r);
 
+  // railshot charge telegraph (aim line + growing muzzle orb)
+  if(e.charging && cf>0){
+    ctx.strokeStyle="rgba(255,61,129,"+(0.25+0.55*cf)+")"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(handX,handY); ctx.lineTo(handX+fx*130,handY+fy*130); ctx.stroke();
+    ctx.fillStyle="#ff3d81"; ctx.shadowColor="#ff3d81"; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.arc(handX,handY,2+cf*7,0,7); ctx.fill(); ctx.shadowBlur=0;
+  }
+
   // head: team-color cap behind, skin face in front, eyes toward aim
   ctx.fillStyle=shade(e.color,-0.05);
   ctx.beginPath(); ctx.arc(gx,headCY,headR,0,7); ctx.fill();
@@ -1330,6 +1449,10 @@ function drawEntity(e){
   ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center"; ctx.fillText(e.name,gx,topY);
   const bw=36; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(gx-bw/2,topY+4,bw,5);
   ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252"; ctx.fillRect(gx-bw/2,topY+4,bw*Math.max(0,e.hp/e.maxHp),5);
+  // reload indicator above head
+  if(rf>0){ ctx.fillStyle="#00e5ff"; ctx.font="bold 10px Segoe UI"; ctx.textAlign="center"; ctx.fillText("RELOADING",gx,topY-9);
+    ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(gx-bw/2,topY-7,bw,4);
+    ctx.fillStyle="#00e5ff"; ctx.fillRect(gx-bw/2,topY-7,bw*(1-rf),4); }
 }
 function drawMinimap(){
   const size=110,pad=14,mx=canvas.width-size-pad,my=canvas.height-size-pad,rad=size/2;
@@ -1356,7 +1479,12 @@ function drawTouchControls(){
   const b=dashBtn(); ctx.globalAlpha=0.4; ctx.fillStyle="#7c5cff";
   ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,7); ctx.fill();
   ctx.globalAlpha=0.9; ctx.fillStyle="#fff"; ctx.font="bold 14px Segoe UI"; ctx.textAlign="center"; ctx.textBaseline="middle";
-  ctx.fillText("DASH",b.x,b.y); ctx.textBaseline="alphabetic"; ctx.restore();
+  ctx.fillText("DASH",b.x,b.y);
+  // reload button
+  const rb=reloadBtn(); ctx.globalAlpha=0.4; ctx.fillStyle="#2a3550";
+  ctx.beginPath(); ctx.arc(rb.x,rb.y,rb.r,0,7); ctx.fill();
+  ctx.globalAlpha=0.9; ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI";
+  ctx.fillText("RELOAD",rb.x,rb.y); ctx.textBaseline="alphabetic"; ctx.restore();
 }
 
 /* ===========================================================================
@@ -1474,7 +1602,7 @@ function renderGamesList(rooms){
   if(busy.length) el.innerHTML+=busy.map(r=>
     `<div class="lrow" style="padding:8px 10px;opacity:.45;"><span class="nm">⏳ ${r.title}</span><span class="small-muted">in progress</span></div>`).join("");
 }
-function joinGame(code){ connect(()=>send({t:"join", code, name:playerName(), color:myColor(), hat:equippedCos("hat").value, back:equippedCos("back").value, stats:myStats()})); }
+function joinGame(code){ connect(()=>send({t:"join", code, name:playerName(), color:myColor(), hat:equippedCos("hat").value, back:equippedCos("back").value, weapon:myWeapon(), stats:myStats()})); }
 function closeOnline(){ stopListPoll(); if(ws&&!room){ ws.close(); ws=null; } online=false; show("menuScreen"); renderMenu(); }
 function connect(then){
   const name=document.getElementById("playerNameInput").value.trim()||playerName();
@@ -1491,7 +1619,14 @@ function connect(then){
   ws.onclose=()=>{ netStatus("Disconnected."); online=false; inMatch=false; };
   ws.onerror=()=>netStatus("Could not connect — check the URL/server.");
 }
-function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:myColor(), hat:equippedCos("hat").value, back:equippedCos("back").value, stats:myStats()})); }
+function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:myColor(), hat:equippedCos("hat").value, back:equippedCos("back").value, weapon:myWeapon(), stats:myStats()})); }
+function setWeapon(k){ if(!WEAPON_KEYS.includes(k)) return; localStorage.setItem("rr_weapon",k); if(online&&room) send({t:"setweapon", weapon:k}); renderWeaponPicks(); }
+function renderWeaponPicks(){
+  const cur=myWeapon();
+  const html='<div class="small-muted" style="margin-bottom:4px;">Weapon — '+(WEAPON_UI.find(u=>u.key===cur)||{}).blurb+'</div>'+
+    WEAPON_UI.map(u=>`<button class="btn small ${u.key===cur?"":"secondary"}" style="margin:3px;" onclick="setWeapon('${u.key}')" title="${u.blurb}">${u.icon} ${WEAPONS[u.key].name}</button>`).join("");
+  ["weaponPicks","lobbyWeaponPicks"].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=html; });
+}
 function leaveRoom(){ stopNetInput(); send({t:"leave"}); if(ws) ws.close(); online=false; room=null; show("menuScreen"); renderMenu(); }
 function toggleBots(){ send({t:"setbots", fill:!room.fillBots}); }
 function startOnline(){ send({t:"start"}); }
@@ -1534,6 +1669,7 @@ function renderRoom(){
     wm.textContent=room.fillBots?"":"AI bots are OFF — only the players in this room will play.";
   } else { hc.innerHTML=""; wm.textContent="Waiting for the host to start…"; }
   document.getElementById("roomCoins").textContent=fmt(save.coins);
+  renderWeaponPicks();
 }
 
 function setupOnlineGame(m){
@@ -1567,13 +1703,19 @@ function onState(m){
   // build render entities
   G.entities=m.entities.map(e=>({ id:e.id, name:e.name, color:e.color, hat:e.hat, back:e.back, isPlayer:e.id===myId,
     x:cx+e.x, y:cy+e.y, r:e.r, angle:e.angle, hp:e.hp, maxHp:e.maxHp, dead:e.dead,
-    score:e.score, kos:e.kos, lives:e.lives, eliminated:e.eliminated, buffs:e.buffs, dashTimer:e.dashTimer, dashCd:e.dashCd, trail:[] }));
+    score:e.score, kos:e.kos, lives:e.lives, eliminated:e.eliminated, buffs:e.buffs, dashTimer:e.dashTimer, dashCd:e.dashCd, trail:[],
+    weapon:e.weapon, ammo:e.ammo, mag:e.mag, reloadF:e.reloadF, discOut:e.discOut, charging:e.charging, chargeF:e.chargeF, iframe:e.iframe }));
   G.player=G.entities.find(e=>e.isPlayer)||null;
   if(G.player&&!G.player.dead){ playerTrail.push({x:G.player.x,y:G.player.y}); if(playerTrail.length>28) playerTrail.shift(); G.player.trail=playerTrail; }
   else playerTrail=[];
-  G.projectiles=m.projectiles.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r,
-    color:p.ownerId===myId?equippedCos("projectile").value:p.color }));
+  G.projectiles=m.projectiles.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r, weapon:p.weapon, disc:p.disc,
+    color:p.ownerId===myId&&p.weapon==="blaster"?equippedCos("projectile").value:p.color }));
   G.powerups=m.powerups.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r, type:p.type, life:p.life }));
+  // server combat events → floats + sound (dodge / reload)
+  if(m.events) for(const ev of m.events){
+    if(ev.type==="dodge"){ floatText(cx+ev.x,cy+ev.y-26,"DODGE!","#9ff0ff"); if(ev.extra===myId) SFX.dodge(); }
+    else if(ev.type==="reloaddone" && ev.extra===myId){ SFX.reload(); }
+  }
   if(G.player) G.coinsEarned=Math.round(G.player.kos*15*statVal("coinMult"));
   updateCountdownUI(m.countdown||0);
   // spectator mode: out of lives but the match keeps playing for everyone else
@@ -1656,6 +1798,7 @@ function setResultButtons(){
 // Gather local input and ship it to the server ~30x/sec.
 function startNetInput(){ inMatch=true; if(netInputTimer) clearInterval(netInputTimer); netInputTimer=setInterval(sendInput,33); }
 function stopNetInput(){ inMatch=false; if(netInputTimer) clearInterval(netInputTimer); netInputTimer=null; }
+let _netPrevShoot=false;
 function sendInput(){
   if(!online||!ws||ws.readyState!==1||!G||!G.player) return;
   let dx=0,dy=0;
@@ -1666,8 +1809,12 @@ function sendInput(){
   if(touch.aim.active){ angle=touch.aim.ang; shoot=touch.aim.shoot; }
   else { const mwy=unprojY(mouse.y); angle=Math.atan2(mwy-G.player.y, mouse.x-G.player.x); shoot=mouse.down; }
   let dash=false; if(keys[" "]||touch.dashReq){ dash=true; touch.dashReq=false; }
-  if(shoot && performance.now()-lastShootSfx>240){ SFX.shoot(); lastShootSfx=performance.now(); }
-  send({t:"input", mvx:dx, mvy:dy, angle, shoot, dash});
+  let reload=false; if(keys["r"]||touch.reloadReq){ reload=true; touch.reloadReq=false; keys["r"]=false; }
+  // local fire SFX on the rising edge only (charge weapon stays quiet until release)
+  const w=curWeapon(G.player);
+  if(w.mode!=="charge" && shoot && !_netPrevShoot) SFX.shootW(G.player.weapon);
+  _netPrevShoot=shoot;
+  send({t:"input", mvx:dx, mvy:dy, angle, shoot, dash, reload});
 }
 
 /* ---- boot ---- */
