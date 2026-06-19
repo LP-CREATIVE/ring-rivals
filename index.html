@@ -817,7 +817,7 @@ function startMatch(){
       zone:{x:cx,y:cy,r:90,baseR:90,timer:12,maxTimer:12}, coinsEarned:0,
       arena:equippedCos("arena").value, puTimer:6, diff:botDifficulty() };
   G.obstacles=genObstacles();
-  G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0; G.countdown=3;
+  G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0; G.countdown=3; walkState={};
   _cdPrev=-1; document.getElementById("countdown").style.display="none";
 
   const player=new Entity(cx, cy+150, equippedCos("character").value, "You", true);
@@ -1115,32 +1115,101 @@ function drawPowerUp(p){
   ctx.fillStyle="#06101f"; ctx.font="bold 18px Segoe UI"; ctx.textAlign="center"; ctx.textBaseline="middle";
   ctx.fillText(t.icon,p.x,y+1); ctx.textBaseline="alphabetic"; ctx.globalAlpha=1;
 }
+// ---- character rendering helpers ----
+let walkState={};                       // per-entity walk-cycle phase (keyed by id/name)
+const SKIN="#f4cda4";
+function shade(hex,amt){                 // lighten (amt>0) / darken (amt<0) a hex color
+  let c=(hex||"#888").replace("#",""); if(c.length===3) c=c.split("").map(x=>x+x).join("");
+  let r=parseInt(c.slice(0,2),16), g=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16);
+  const t=amt<0?0:255, p=Math.min(1,Math.abs(amt));
+  r=Math.round(r+(t-r)*p); g=Math.round(g+(t-g)*p); b=Math.round(b+(t-b)*p);
+  return "rgb("+r+","+g+","+b+")";
+}
+function roundRectPath(x,y,w,h,r){ r=Math.min(r,w/2,h/2);
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function drawTorso(cx,cy,halfW,h,color){
+  const x=cx-halfW, y=cy-h/2, g=ctx.createLinearGradient(0,y,0,y+h);
+  g.addColorStop(0,shade(color,0.28)); g.addColorStop(1,shade(color,-0.22));
+  ctx.fillStyle=g; roundRectPath(x,y,halfW*2,h,halfW*0.7); ctx.fill();
+}
+function drawArmsGun(e,gx,bodyCY,fx,fy,pxv,pyv,handX,handY,r){
+  // gun barrel
+  ctx.strokeStyle="#232733"; ctx.lineWidth=r*0.3;
+  ctx.beginPath(); ctx.moveTo(handX,handY); ctx.lineTo(handX+fx*r*0.95,handY+fy*r*0.95); ctx.stroke();
+  ctx.fillStyle="#4a525f"; ctx.beginPath(); ctx.arc(handX+fx*r*0.95,handY+fy*r*0.95,r*0.16,0,7); ctx.fill();
+  // arms
+  ctx.strokeStyle=shade(e.color,0.05); ctx.lineWidth=r*0.24;
+  ctx.beginPath(); ctx.moveTo(gx+pxv*r*0.45,bodyCY+pyv*r*0.2); ctx.lineTo(handX,handY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(gx-pxv*r*0.45,bodyCY-pyv*r*0.2); ctx.lineTo(handX,handY); ctx.stroke();
+  // hands
+  ctx.fillStyle=SKIN; ctx.beginPath(); ctx.arc(handX,handY,r*0.18,0,7); ctx.fill();
+}
+// Draw a little 2.5D character: legs, body, head+face, arm holding a gun, facing aim.
 function drawEntity(e){
-  const gy=pY(e.y), by=gy-ENTITY_H;          // ground Y and raised body Y
-  // trail flat on the ground
+  const r=e.r, gx=e.x, gy=pY(e.y), a=e.angle;
+  const fx=Math.cos(a), fy=Math.sin(a)*TILT;        // facing (projected to tilted plane)
+  const pxv=-Math.sin(a), pyv=Math.cos(a)*TILT;     // perpendicular (projected)
+  const legH=r*0.6, bodyH=r*1.05, headR=r*0.52;
+  const hipY=gy-legH, bodyCY=hipY-bodyH*0.5, headCY=hipY-bodyH-headR*0.55;
+
+  // trail on the ground
   const tcos=equippedCos("trail");
   if(e.isPlayer&&tcos.value){
     for(let i=0;i<e.trail.length;i++){ const t=e.trail[i], f=i/e.trail.length;
-      ctx.globalAlpha=f*0.5; ctx.fillStyle=tcos.value;
-      ctx.beginPath(); ctx.ellipse(t.x,pY(t.y),e.r*f,e.r*f*TILT,0,0,7); ctx.fill(); }
+      ctx.globalAlpha=f*0.45; ctx.fillStyle=tcos.value;
+      ctx.beginPath(); ctx.ellipse(t.x,pY(t.y),r*f*0.8,r*f*0.8*TILT,0,0,7); ctx.fill(); }
     ctx.globalAlpha=1;
   }
   // buff ring on the floor
-  if(e.buffs.speed>0||e.buffs.rapid>0){ ctx.strokeStyle=e.buffs.rapid>0?"#ff3d81":"#00e5ff"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.ellipse(e.x,gy,e.r+7,(e.r+7)*TILT,0,0,7); ctx.stroke(); }
-  ctx.save();
-  ctx.shadowColor=e.color; ctx.shadowBlur=e.isPlayer?22:12; ctx.fillStyle=e.color;
-  ctx.beginPath(); ctx.arc(e.x,by,e.r,0,7); ctx.fill(); ctx.shadowBlur=0;
-  // top highlight (light from above)
-  ctx.fillStyle="rgba(255,255,255,.85)"; ctx.beginPath(); ctx.arc(e.x-e.r*0.2,by-e.r*0.25,e.r*0.4,0,7); ctx.fill();
-  // aim barrel (direction projected onto the tilted plane)
-  ctx.strokeStyle="#fff"; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(e.x,by);
-  ctx.lineTo(e.x+Math.cos(e.angle)*(e.r+10), by+Math.sin(e.angle)*(e.r+10)*TILT); ctx.stroke();
+  if(e.buffs&&(e.buffs.speed>0||e.buffs.rapid>0)){ ctx.strokeStyle=e.buffs.rapid>0?"#ff3d81":"#00e5ff"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(gx,gy,r+7,(r+7)*TILT,0,0,7); ctx.stroke(); }
+
+  // walk cycle — advance phase with movement
+  const key=e.id||e.name, ws=walkState[key]||(walkState[key]={x:gx,y:gy,phase:0});
+  const moved=Math.hypot(gx-ws.x,gy-ws.y); ws.phase+=Math.min(moved,6)*0.32+0.04; ws.x=gx; ws.y=gy;
+  const lift1=Math.max(0,Math.sin(ws.phase))*(moved>0.4?r*0.28:0);
+  const lift2=Math.max(0,-Math.sin(ws.phase))*(moved>0.4?r*0.28:0);
+
+  ctx.save(); ctx.lineCap="round"; ctx.lineJoin="round";
+
+  // legs side-by-side, alternating walk step
+  ctx.strokeStyle=shade(e.color,-0.5); ctx.lineWidth=r*0.32;
+  ctx.beginPath(); ctx.moveTo(gx-r*0.28,hipY); ctx.lineTo(gx-r*0.28,gy-lift1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(gx+r*0.28,hipY); ctx.lineTo(gx+r*0.28,gy-lift2); ctx.stroke();
+  ctx.fillStyle=shade(e.color,-0.62);
+  ctx.beginPath(); ctx.ellipse(gx-r*0.28,gy-lift1,r*0.21,r*0.12,0,0,7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(gx+r*0.28,gy-lift2,r*0.21,r*0.12,0,0,7); ctx.fill();
+
+  const handX=gx+fx*r*1.0, handY=bodyCY+fy*r*1.0;
+  const gunBehind=fy<-0.02;   // aiming away from camera → arms/gun behind the torso
+
+  if(gunBehind) drawArmsGun(e,gx,bodyCY,fx,fy,pxv,pyv,handX,handY,r);
+
+  // torso with glow + shading
+  ctx.shadowColor=e.color; ctx.shadowBlur=e.isPlayer?16:8;
+  drawTorso(gx,bodyCY,r*0.8,bodyH,e.color);
+  ctx.shadowBlur=0;
+
+  if(!gunBehind) drawArmsGun(e,gx,bodyCY,fx,fy,pxv,pyv,handX,handY,r);
+
+  // head: team-color cap behind, skin face in front, eyes toward aim
+  ctx.fillStyle=shade(e.color,-0.05);
+  ctx.beginPath(); ctx.arc(gx,headCY,headR,0,7); ctx.fill();
+  ctx.fillStyle=SKIN;
+  ctx.beginPath(); ctx.arc(gx+fx*headR*0.24,headCY+fy*headR*0.24,headR*0.82,0,7); ctx.fill();
+  ctx.fillStyle="#1a2030";
+  const ex=gx+fx*headR*0.5, ey=headCY+fy*headR*0.5;
+  ctx.beginPath(); ctx.arc(ex+pxv*headR*0.32,ey+pyv*headR*0.32,headR*0.15,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(ex-pxv*headR*0.32,ey-pyv*headR*0.32,headR*0.15,0,7); ctx.fill();
   ctx.restore();
-  // name + hp bar above the body
-  ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center"; ctx.fillText(e.name,e.x,by-e.r-14);
-  const bw=36; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(e.x-bw/2,by-e.r-10,bw,5);
-  ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252"; ctx.fillRect(e.x-bw/2,by-e.r-10,bw*Math.max(0,e.hp/e.maxHp),5);
+
+  // name + hp bar above the head
+  const topY=headCY-headR-12;
+  ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center"; ctx.fillText(e.name,gx,topY);
+  const bw=36; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(gx-bw/2,topY+4,bw,5);
+  ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252"; ctx.fillRect(gx-bw/2,topY+4,bw*Math.max(0,e.hp/e.maxHp),5);
 }
 function drawMinimap(){
   const size=110,pad=14,mx=canvas.width-size-pad,my=canvas.height-size-pad,rad=size/2;
@@ -1353,7 +1422,7 @@ function setupOnlineGame(m){
   G={ online:true, cx, cy, mode:m.mode, arena:equippedCos("arena").value, shake:0, over:false,
       zone:{x:cx,y:cy,r:90}, obstacles:m.obstacles.map(o=>({x:cx+o.x,y:cy+o.y,r:o.r})),
       entities:[], projectiles:[], particles:[], floats:[], powerups:[], coinsEarned:0, player:null };
-  prevEntById={}; playerTrail=[];
+  prevEntById={}; playerTrail=[]; walkState={};
   G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0;
   _cdPrev=-1; document.getElementById("countdown").style.display="none";
   document.getElementById("specBanner").style.display="none";
