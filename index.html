@@ -552,7 +552,7 @@ canvas.addEventListener("touchmove",e=>{
       touch.move.dx=dx/max; touch.move.dy=dy/max;
     } else if(touch.aim.active&&t.identifier===touch.aim.id && G&&G.player){
       // aim relative to the player position (drag anywhere on the right side)
-      touch.aim.ang=Math.atan2(p.y-G.player.y, p.x-G.player.x); touch.aim.shoot=true;
+      const mwy=unprojY(p.y); touch.aim.ang=Math.atan2(mwy-G.player.y, p.x-G.player.x); touch.aim.shoot=true;
     }
   }
 },{passive:false});
@@ -572,6 +572,15 @@ canvas.addEventListener("touchcancel",endTouch,{passive:false});
 const BOT_NAMES=["Bolt","Hex","Nova","Tank","Viper"];
 const BOT_COLORS=["#ff5252","#27e08a","#ffa726","#b388ff","#26c6da"];
 const MATCH_TIME=120, SCORE_TO_WIN=100, ZONE_PER_SEC=8, PROJ_DMG=12, ARENA_R=440;
+
+// ---- fake-3D top-down projection (vertical foreshorten) ----
+// Gameplay stays in flat 2D world coords; only RENDERING is tilted.
+const TILT=0.62;                              // squash the Y axis to fake a tilted camera
+const ENTITY_H=20, PILLAR_H=50, PU_H=24;      // screen-space heights
+function pY(wy){ return G.cy+(wy-G.cy)*TILT; }        // world Y -> screen Y
+function unprojY(sy){ return G.cy+(sy-G.cy)/TILT; }   // screen Y -> world Y (for aiming)
+function groundShadow(wx,wy,r){ ctx.save(); ctx.globalAlpha=0.3; ctx.fillStyle="#000";
+  ctx.beginPath(); ctx.ellipse(wx,pY(wy),r,r*TILT,0,0,7); ctx.fill(); ctx.restore(); }
 
 // Zone modes — chosen randomly each match for variety.
 const ZONE_MODES = {
@@ -913,7 +922,7 @@ function controlPlayer(e,dt){
 
   // aim + shoot
   if(touch.aim.active){ e.angle=touch.aim.ang; if(touch.aim.shoot) entityShoot(e, e.x+Math.cos(e.angle)*100, e.y+Math.sin(e.angle)*100); }
-  else { e.angle=Math.atan2(mouse.y-e.y, mouse.x-e.x); if(mouse.down) entityShoot(e,mouse.x,mouse.y); }
+  else { const mwy=unprojY(mouse.y); e.angle=Math.atan2(mwy-e.y, mouse.x-e.x); if(mouse.down) entityShoot(e,mouse.x,mwy); }
 
   // dash
   if(keys[" "]||touch.dashReq){ entityDash(e, (dx||Math.cos(e.angle)), (dy||Math.sin(e.angle))); touch.dashReq=false; }
@@ -942,38 +951,39 @@ function render(){
   ctx.save();
   if(G.shake>0) ctx.translate((Math.random()-0.5)*G.shake,(Math.random()-0.5)*G.shake);
   drawArena();
-  drawObstacles();
+  drawZone();
 
-  // zone
-  const z=G.zone, pulse=0.5+0.5*Math.sin(Date.now()/300);
-  const zc = G.mode==="koth" ? "255,211,61" : G.mode==="shrink" ? "255,61,129" : "0,229,255";
-  const grad=ctx.createRadialGradient(z.x,z.y,10,z.x,z.y,z.r);
-  grad.addColorStop(0,"rgba("+zc+","+(0.28+pulse*0.12)+")"); grad.addColorStop(1,"rgba("+zc+",0)");
-  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(z.x,z.y,z.r,0,7); ctx.fill();
-  ctx.strokeStyle="rgba("+zc+","+(0.6+pulse*0.4)+")"; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(z.x,z.y,z.r,0,7); ctx.stroke();
+  // ground shadows under every raised object (drawn flat on the floor first)
+  for(const o of G.obstacles) groundShadow(o.x,o.y,o.r*1.05);
+  for(const p of G.powerups) groundShadow(p.x,p.y,p.r);
+  for(const e of G.entities){ if(!e.dead) groundShadow(e.x,e.y,e.r); }
 
-  // power-ups
-  for(const p of G.powerups){
-    const t=POWERUP_TYPES[p.type], blink=p.life<3?(0.4+0.6*Math.abs(Math.sin(Date.now()/120))):1;
-    ctx.globalAlpha=blink; ctx.fillStyle=t.color; ctx.shadowColor=t.color; ctx.shadowBlur=16;
-    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); ctx.shadowBlur=0;
-    ctx.fillStyle="#06101f"; ctx.font="bold 18px Segoe UI"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(t.icon,p.x,p.y+1); ctx.textBaseline="alphabetic"; ctx.globalAlpha=1;
-  }
+  // depth-sort all raised objects back-to-front (painter's algorithm by world Y)
+  const items=[];
+  for(const o of G.obstacles) items.push({y:o.y,draw:()=>drawPillar(o)});
+  for(const e of G.entities){ if(!e.dead) items.push({y:e.y,draw:()=>drawEntity(e)}); }
+  for(const p of G.powerups) items.push({y:p.y,draw:()=>drawPowerUp(p)});
+  for(const pr of G.projectiles) items.push({y:pr.y,draw:()=>drawProjectile(pr)});
+  items.sort((a,b)=>a.y-b.y);
+  for(const it of items) it.draw();
 
-  for(const p of G.particles){ ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }
-  ctx.globalAlpha=1;
-  for(const p of G.projectiles){ ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=12; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); ctx.shadowBlur=0; }
-  for(const e of G.entities){ if(!e.dead) drawEntity(e); }
-  for(const f of G.floats){ ctx.globalAlpha=Math.max(0,f.life); ctx.fillStyle=f.color; ctx.font="bold 16px Segoe UI"; ctx.textAlign="center"; ctx.fillText(f.text,f.x,f.y); }
+  // particles (lifted slightly off the floor)
+  for(const p of G.particles){ ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,pY(p.y)-10,p.r,0,7); ctx.fill(); }
   ctx.globalAlpha=1;
 
-  // directional arrow to zone
+  // floating text (above heads)
+  for(const f of G.floats){ ctx.globalAlpha=Math.max(0,f.life); ctx.fillStyle=f.color;
+    ctx.font="bold 16px Segoe UI"; ctx.textAlign="center"; ctx.fillText(f.text,f.x,pY(f.y)-ENTITY_H); }
+  ctx.globalAlpha=1;
+
+  // directional arrow to zone (direction projected onto the tilted plane)
   if(G.player&&!G.player.dead){
     const zd=Math.hypot(G.player.x-G.zone.x,G.player.y-G.zone.y);
     if(zd>G.zone.r+40){ const a=Math.atan2(G.zone.y-G.player.y,G.zone.x-G.player.x);
-      const ax=G.player.x+Math.cos(a)*40, ay=G.player.y+Math.sin(a)*40;
-      ctx.save(); ctx.translate(ax,ay); ctx.rotate(a); ctx.fillStyle="rgba(0,229,255,.8)";
+      const sx=G.player.x+Math.cos(a)*40, sy=pY(G.player.y+Math.sin(a)*40)-ENTITY_H;
+      const sa=Math.atan2(Math.sin(a)*TILT,Math.cos(a));
+      ctx.save(); ctx.translate(sx,sy); ctx.rotate(sa); ctx.fillStyle="rgba(0,229,255,.8)";
       ctx.beginPath(); ctx.moveTo(10,0); ctx.lineTo(-6,-6); ctx.lineTo(-6,6); ctx.closePath(); ctx.fill(); ctx.restore(); }
   }
   ctx.restore();
@@ -983,51 +993,86 @@ function render(){
 function drawArena(){
   ctx.fillStyle=G.arena==="dark"?"#05070d":G.arena==="retro"?"#100a1f":"#070b14";
   ctx.fillRect(0,0,canvas.width,canvas.height);
+  const cy=pY(G.cy), ry=ARENA_R*TILT;
   ctx.save();
-  const g=ctx.createRadialGradient(G.cx,G.cy,ARENA_R*0.3,G.cx,G.cy,ARENA_R);
+  const g=ctx.createRadialGradient(G.cx,cy,ARENA_R*0.3,G.cx,cy,ARENA_R);
   if(G.arena==="dark"){ g.addColorStop(0,"#0b1020"); g.addColorStop(1,"#04060c"); }
   else if(G.arena==="retro"){ g.addColorStop(0,"#1c1133"); g.addColorStop(1,"#0c0718"); }
   else { g.addColorStop(0,"#0f1730"); g.addColorStop(1,"#070b14"); }
-  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(G.cx,G.cy,ARENA_R,0,7); ctx.fill();
+  ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(G.cx,cy,ARENA_R,ry,0,0,7); ctx.fill();
   if(G.arena==="retro"){
-    ctx.save(); ctx.beginPath(); ctx.arc(G.cx,G.cy,ARENA_R,0,7); ctx.clip();
+    ctx.save(); ctx.beginPath(); ctx.ellipse(G.cx,cy,ARENA_R,ry,0,0,7); ctx.clip();
     ctx.strokeStyle="rgba(124,92,255,.25)"; ctx.lineWidth=1;
-    for(let x=G.cx-ARENA_R;x<G.cx+ARENA_R;x+=28){ ctx.beginPath();ctx.moveTo(x,G.cy-ARENA_R);ctx.lineTo(x,G.cy+ARENA_R);ctx.stroke(); }
-    for(let y=G.cy-ARENA_R;y<G.cy+ARENA_R;y+=28){ ctx.beginPath();ctx.moveTo(G.cx-ARENA_R,y);ctx.lineTo(G.cx+ARENA_R,y);ctx.stroke(); }
+    for(let x=G.cx-ARENA_R;x<G.cx+ARENA_R;x+=28){ ctx.beginPath();ctx.moveTo(x,cy-ry);ctx.lineTo(x,cy+ry);ctx.stroke(); }
+    for(let y=cy-ry;y<cy+ry;y+=16){ ctx.beginPath();ctx.moveTo(G.cx-ARENA_R,y);ctx.lineTo(G.cx+ARENA_R,y);ctx.stroke(); }
     ctx.restore();
   }
   const edge=G.arena==="retro"?"#9b4dff":G.arena==="dark"?"#3a7bd5":"#00e5ff";
   ctx.strokeStyle=edge; ctx.lineWidth=5; ctx.shadowColor=edge; ctx.shadowBlur=25;
-  ctx.beginPath(); ctx.arc(G.cx,G.cy,ARENA_R,0,7); ctx.stroke(); ctx.shadowBlur=0; ctx.restore();
+  ctx.beginPath(); ctx.ellipse(G.cx,cy,ARENA_R,ry,0,0,7); ctx.stroke(); ctx.shadowBlur=0; ctx.restore();
 }
-function drawObstacles(){
-  for(const o of G.obstacles){
-    ctx.save();
-    const g=ctx.createRadialGradient(o.x-o.r*0.3,o.y-o.r*0.3,4,o.x,o.y,o.r);
-    g.addColorStop(0,"#2a3658"); g.addColorStop(1,"#10162a");
-    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,7); ctx.fill();
-    ctx.strokeStyle="rgba(124,92,255,.5)"; ctx.lineWidth=2; ctx.stroke(); ctx.restore();
-  }
+function drawZone(){
+  const z=G.zone, cy=pY(z.y), ry=z.r*TILT, pulse=0.5+0.5*Math.sin(Date.now()/300);
+  const zc=G.mode==="koth"?"255,211,61":G.mode==="shrink"?"255,61,129":"0,229,255";
+  const grad=ctx.createRadialGradient(z.x,cy,10,z.x,cy,z.r);
+  grad.addColorStop(0,"rgba("+zc+","+(0.30+pulse*0.14)+")"); grad.addColorStop(1,"rgba("+zc+",0)");
+  ctx.fillStyle=grad; ctx.beginPath(); ctx.ellipse(z.x,cy,z.r,ry,0,0,7); ctx.fill();
+  ctx.strokeStyle="rgba("+zc+","+(0.6+pulse*0.4)+")"; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.ellipse(z.x,cy,z.r,ry,0,0,7); ctx.stroke();
+}
+function drawPillar(o){
+  const baseY=pY(o.y), ry=o.r*TILT, topY=baseY-PILLAR_H;
+  // body sides (rectangle between top cap and rounded base)
+  ctx.fillStyle="#141b30"; ctx.fillRect(o.x-o.r,topY,o.r*2,PILLAR_H);
+  ctx.beginPath(); ctx.ellipse(o.x,baseY,o.r,ry,0,0,Math.PI); ctx.fill();
+  const sg=ctx.createLinearGradient(o.x-o.r,0,o.x+o.r,0);
+  sg.addColorStop(0,"rgba(0,0,0,.4)"); sg.addColorStop(.5,"rgba(255,255,255,.05)"); sg.addColorStop(1,"rgba(0,0,0,.4)");
+  ctx.fillStyle=sg; ctx.fillRect(o.x-o.r,topY,o.r*2,PILLAR_H);
+  // glowing top cap
+  const tg=ctx.createRadialGradient(o.x-o.r*0.3,topY-ry*0.4,2,o.x,topY,o.r);
+  tg.addColorStop(0,"#36456a"); tg.addColorStop(1,"#1a2238");
+  ctx.fillStyle=tg; ctx.beginPath(); ctx.ellipse(o.x,topY,o.r,ry,0,0,7); ctx.fill();
+  ctx.strokeStyle="rgba(124,92,255,.6)"; ctx.lineWidth=2; ctx.stroke();
+}
+function drawProjectile(p){
+  const y=pY(p.y)-14;
+  ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=12;
+  ctx.beginPath(); ctx.arc(p.x,y,p.r,0,7); ctx.fill(); ctx.shadowBlur=0;
+}
+function drawPowerUp(p){
+  const t=POWERUP_TYPES[p.type], bob=Math.sin(Date.now()/300+p.x)*3;
+  const y=pY(p.y)-PU_H+bob, blink=p.life<3?(0.4+0.6*Math.abs(Math.sin(Date.now()/120))):1;
+  ctx.globalAlpha=blink; ctx.fillStyle=t.color; ctx.shadowColor=t.color; ctx.shadowBlur=16;
+  ctx.beginPath(); ctx.arc(p.x,y,p.r,0,7); ctx.fill(); ctx.shadowBlur=0;
+  ctx.fillStyle="#06101f"; ctx.font="bold 18px Segoe UI"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(t.icon,p.x,y+1); ctx.textBaseline="alphabetic"; ctx.globalAlpha=1;
 }
 function drawEntity(e){
+  const gy=pY(e.y), by=gy-ENTITY_H;          // ground Y and raised body Y
+  // trail flat on the ground
   const tcos=equippedCos("trail");
   if(e.isPlayer&&tcos.value){
-    for(let i=0;i<e.trail.length;i++){ const t=e.trail[i]; ctx.globalAlpha=i/e.trail.length*0.5;
-      ctx.fillStyle=tcos.value; ctx.beginPath(); ctx.arc(t.x,t.y,e.r*(i/e.trail.length),0,7); ctx.fill(); }
+    for(let i=0;i<e.trail.length;i++){ const t=e.trail[i], f=i/e.trail.length;
+      ctx.globalAlpha=f*0.5; ctx.fillStyle=tcos.value;
+      ctx.beginPath(); ctx.ellipse(t.x,pY(t.y),e.r*f,e.r*f*TILT,0,0,7); ctx.fill(); }
     ctx.globalAlpha=1;
   }
-  ctx.save();
-  // buff ring
+  // buff ring on the floor
   if(e.buffs.speed>0||e.buffs.rapid>0){ ctx.strokeStyle=e.buffs.rapid>0?"#ff3d81":"#00e5ff"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(e.x,e.y,e.r+6,0,7); ctx.stroke(); }
+    ctx.beginPath(); ctx.ellipse(e.x,gy,e.r+7,(e.r+7)*TILT,0,0,7); ctx.stroke(); }
+  ctx.save();
   ctx.shadowColor=e.color; ctx.shadowBlur=e.isPlayer?22:12; ctx.fillStyle=e.color;
-  ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,7); ctx.fill(); ctx.shadowBlur=0;
-  ctx.fillStyle="rgba(255,255,255,.85)"; ctx.beginPath(); ctx.arc(e.x,e.y,e.r*0.45,0,7); ctx.fill();
-  ctx.strokeStyle="#fff"; ctx.lineWidth=4; ctx.beginPath();
-  ctx.moveTo(e.x,e.y); ctx.lineTo(e.x+Math.cos(e.angle)*(e.r+10),e.y+Math.sin(e.angle)*(e.r+10)); ctx.stroke(); ctx.restore();
-  ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center"; ctx.fillText(e.name,e.x,e.y-e.r-14);
-  const bw=36; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(e.x-bw/2,e.y-e.r-10,bw,5);
-  ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252"; ctx.fillRect(e.x-bw/2,e.y-e.r-10,bw*Math.max(0,e.hp/e.maxHp),5);
+  ctx.beginPath(); ctx.arc(e.x,by,e.r,0,7); ctx.fill(); ctx.shadowBlur=0;
+  // top highlight (light from above)
+  ctx.fillStyle="rgba(255,255,255,.85)"; ctx.beginPath(); ctx.arc(e.x-e.r*0.2,by-e.r*0.25,e.r*0.4,0,7); ctx.fill();
+  // aim barrel (direction projected onto the tilted plane)
+  ctx.strokeStyle="#fff"; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(e.x,by);
+  ctx.lineTo(e.x+Math.cos(e.angle)*(e.r+10), by+Math.sin(e.angle)*(e.r+10)*TILT); ctx.stroke();
+  ctx.restore();
+  // name + hp bar above the body
+  ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center"; ctx.fillText(e.name,e.x,by-e.r-14);
+  const bw=36; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(e.x-bw/2,by-e.r-10,bw,5);
+  ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252"; ctx.fillRect(e.x-bw/2,by-e.r-10,bw*Math.max(0,e.hp/e.maxHp),5);
 }
 function drawMinimap(){
   const size=110,pad=14,mx=canvas.width-size-pad,my=canvas.height-size-pad,rad=size/2;
