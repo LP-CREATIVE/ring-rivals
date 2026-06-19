@@ -99,6 +99,8 @@ body{
 .rank-badge{font-size:13px;font-weight:800;padding:4px 12px;border-radius:8px;letter-spacing:1px;}
 .small-muted{color:var(--muted);font-size:13px;}
 .back-btn{position:absolute;top:18px;left:18px;}
+.ninput{width:100%;padding:12px 14px;margin:8px 0;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c1120;color:var(--text);font-size:15px;font-weight:600;text-align:center;text-transform:none;}
+#roomCode{font-size:48px;font-weight:900;letter-spacing:8px;color:var(--accent);margin:4px 0 14px;text-shadow:0 0 24px rgba(0,229,255,.4);}
 .hist{background:var(--panel2);border-radius:12px;padding:12px 16px;margin-top:16px;text-align:left;}
 </style>
 </head>
@@ -112,6 +114,7 @@ body{
     <div style="margin-bottom:18px;"><span id="rankBadge" class="rank-badge">BRONZE</span></div>
     <div class="menu-buttons">
       <button class="btn" onclick="startMatch()">▶ PLAY</button>
+      <button class="btn pink" onclick="openOnline()">🌐 PLAY ONLINE</button>
       <button class="btn secondary" onclick="show('shopScreen');renderShop()">🛒 SHOP</button>
       <button class="btn secondary" onclick="show('upgradeScreen');renderUpgrades()">⚡ UPGRADES</button>
       <button class="btn secondary" onclick="show('cosmeticScreen');renderCosmetics()">🎨 COSMETICS</button>
@@ -189,6 +192,35 @@ body{
   </div>
 </div>
 
+<!-- ============================ ONLINE: LOBBY ENTRY ============================ -->
+<div id="onlineScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <div class="panel" style="max-width:480px;text-align:center;">
+    <h2 style="margin-top:0;">🌐 Play Online</h2>
+    <p class="small-muted">Create a room and share the 4-letter code, or join a friend's room.</p>
+    <input id="playerNameInput" class="ninput" placeholder="Your name" maxlength="14" />
+    <input id="serverUrl" class="ninput" placeholder="wss://your-server.up.railway.app" />
+    <div id="netStatus" class="small-muted" style="min-height:18px;margin:6px 0;"></div>
+    <button class="btn" style="width:100%;margin-bottom:14px;" onclick="createRoom()">➕ CREATE ROOM</button>
+    <div style="display:flex;gap:8px;">
+      <input id="joinCode" class="ninput" style="flex:1;margin:0;letter-spacing:4px;text-transform:uppercase;" placeholder="CODE" maxlength="4" />
+      <button class="btn secondary" onclick="joinRoom()">JOIN</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ ONLINE: ROOM/LOBBY ============================ -->
+<div id="roomScreen" class="screen">
+  <button class="btn secondary small back-btn" onclick="leaveRoom()">← Leave</button>
+  <div class="panel" style="max-width:480px;text-align:center;">
+    <div class="small-muted">Room code — share with friends</div>
+    <div id="roomCode"></div>
+    <div id="roomPlayers" style="text-align:left;margin-bottom:16px;"></div>
+    <div id="hostControls"></div>
+    <div id="waitMsg" class="small-muted"></div>
+  </div>
+</div>
+
 <!-- ============================ GAME ============================ -->
 <div id="gameScreen" class="screen">
   <div id="gameWrap">
@@ -226,7 +258,7 @@ body{
       <div class="rcell"><div class="v xpc" id="rXp">0</div><div class="l">XP</div></div>
       <div class="rcell"><div class="v" id="rRank">Bronze</div><div class="l">Rank</div></div>
     </div>
-    <div class="menu-buttons" style="justify-content:center;">
+    <div class="menu-buttons" style="justify-content:center;" id="resultBtns">
       <button class="btn" onclick="startMatch()">🔁 REMATCH</button>
       <button class="btn secondary" onclick="show('upgradeScreen');renderUpgrades()">⚡ UPGRADES</button>
       <button class="btn secondary" onclick="show('menuScreen');renderMenu()">🏠 MENU</button>
@@ -821,6 +853,7 @@ function endMatch(){
   const r=currentRank(); const rr=document.getElementById("rRank"); rr.textContent=r.name; rr.style.color=r.color;
   document.getElementById("levelUp").style.display=leveled?"block":"none";
   (won?SFX.win:SFX.lose)();
+  setResultButtons();
   show("resultScreen");
   if(earned.length) setTimeout(()=>toast("🏆 "+earned.join(", ")),600);
 }
@@ -932,6 +965,7 @@ function controlPlayer(e,dt){
    HUD
    =========================================================================== */
 function updateHUD(){
+  if(!G.player) return;
   const m=Math.floor(G.time/60), s=Math.floor(G.time%60);
   document.getElementById("hudTimer").textContent=m+":"+String(s).padStart(2,"0");
   document.getElementById("hudCoins").textContent=G.coinsEarned;
@@ -1108,10 +1142,211 @@ function drawTouchControls(){
 let last=performance.now();
 function loop(now){
   let dt=(now-last)/1000; last=now; if(dt>0.05) dt=0.05;
-  if(G && !G.over && document.getElementById("gameScreen").classList.contains("active")){ update(dt); render(); }
+  if(G && document.getElementById("gameScreen").classList.contains("active")){
+    if(G.online){ tickEffects(dt); render(); }           // online: render server state + local fx only
+    else if(!G.over){ update(dt); render(); }             // local: full simulation
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+// Online-only effects updater (particles/floats/shake) since update() doesn't run online.
+function tickEffects(dt){
+  for(const pt of G.particles){ pt.x+=pt.dx; pt.y+=pt.dy; pt.dx*=0.94; pt.dy*=0.94; pt.life-=dt*1.8; }
+  G.particles=G.particles.filter(p=>p.life>0);
+  for(const f of G.floats){ f.y+=f.dy; f.life-=dt*1.1; }
+  G.floats=G.floats.filter(f=>f.life>0);
+  G.shake*=0.85;
+}
+
+/* ===========================================================================
+   12. MULTIPLAYER CLIENT  (lobby + authoritative-server netcode)
+   The server runs the simulation; we send inputs and render the snapshots.
+   =========================================================================== */
+const DEFAULT_SERVER="";   // baked in after Railway deploy so friends need no setup
+let ws=null, myId=null, room=null, isHost=false, online=false, inMatch=false;
+let netInputTimer=null, lastShootSfx=0, prevEntById={}, playerTrail=[];
+
+function netStatus(msg){ document.getElementById("netStatus").textContent=msg; }
+function send(obj){ if(ws&&ws.readyState===1) ws.send(JSON.stringify(obj)); }
+function getServerUrl(){
+  const saved=localStorage.getItem("rr_server"); if(saved) return saved;
+  if(DEFAULT_SERVER) return DEFAULT_SERVER;
+  if(location.protocol.startsWith("http")&&!location.host.includes("github.io"))
+    return (location.protocol==="https:"?"wss://":"ws://")+location.host;   // served by the Node server
+  return "";
+}
+function playerName(){
+  let n=localStorage.getItem("rr_name");
+  if(!n){ n="Player"+Math.floor(Math.random()*900+100); localStorage.setItem("rr_name",n); }
+  return n;
+}
+function myStats(){ return { speed:statVal("speed"), maxHp:statVal("health"), dashCd:statVal("dash"), knock:statVal("knockback"), zoneMult:statVal("zoneMult") }; }
+
+function openOnline(){
+  initAudio();
+  show("onlineScreen");
+  document.getElementById("playerNameInput").value=playerName();
+  document.getElementById("serverUrl").value=localStorage.getItem("rr_server")||DEFAULT_SERVER||getServerUrl();
+  netStatus(DEFAULT_SERVER?"":"Tip: paste your Railway server URL once — it's saved.");
+}
+function connect(then){
+  const name=document.getElementById("playerNameInput").value.trim()||playerName();
+  localStorage.setItem("rr_name",name.slice(0,14));
+  const url=document.getElementById("serverUrl").value.trim();
+  if(!url){ netStatus("Enter a server URL first."); return; }
+  localStorage.setItem("rr_server",url);
+  if(ws&&ws.readyState===1){ then(); return; }
+  try{ ws=new WebSocket(url); }catch(e){ netStatus("Invalid server URL."); return; }
+  netStatus("Connecting…");
+  ws.onopen=()=>{ netStatus("Connected."); then(); };
+  ws.onmessage=e=>handleMsg(JSON.parse(e.data));
+  ws.onclose=()=>{ netStatus("Disconnected."); online=false; inMatch=false; };
+  ws.onerror=()=>netStatus("Could not connect — check the URL/server.");
+}
+function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:equippedCos("character").value, stats:myStats()})); }
+function joinRoom(){
+  const code=document.getElementById("joinCode").value.trim().toUpperCase();
+  if(code.length<4){ netStatus("Enter the 4-letter code."); return; }
+  connect(()=>send({t:"join", code, name:playerName(), color:equippedCos("character").value, stats:myStats()}));
+}
+function leaveRoom(){ stopNetInput(); send({t:"leave"}); if(ws) ws.close(); online=false; room=null; show("menuScreen"); renderMenu(); }
+function toggleBots(){ send({t:"setbots", fill:!room.fillBots}); }
+function startOnline(){ send({t:"start"}); }
+function rematchOnline(){ send({t:"rematch"}); }
+function backToLobby(){ show("roomScreen"); renderRoom(); }
+
+function handleMsg(m){
+  if(m.t==="error"){ netStatus(m.msg); return; }
+  if(m.t==="created"||m.t==="joined"){
+    myId=m.youId; room={code:m.code, players:m.players, fillBots:m.fillBots};
+    isHost=(m.players.find(p=>p.id===myId)||{}).host; online=true; show("roomScreen"); renderRoom();
+  }
+  else if(m.t==="lobby"){
+    room={code:m.code, players:m.players, fillBots:m.fillBots};
+    isHost=(m.players.find(p=>p.id===myId)||{}).host;
+    if(document.getElementById("roomScreen").classList.contains("active")) renderRoom();
+  }
+  else if(m.t==="start"){ setupOnlineGame(m); }
+  else if(m.t==="state"){ onState(m); }
+  else if(m.t==="end"){ onEnd(m); }
+}
+
+function renderRoom(){
+  document.getElementById("roomCode").textContent=room.code;
+  document.getElementById("roomPlayers").innerHTML=room.players.map(p=>
+    `<div class="lrow"><span class="nm"><span class="dot" style="background:${p.color}"></span>${p.name}${p.id===myId?" (you)":""}${p.host?" 👑":""}</span></div>`).join("");
+  const hc=document.getElementById("hostControls"), wm=document.getElementById("waitMsg");
+  if(isHost){
+    hc.innerHTML=`<div class="set-row" style="border:none;justify-content:center;gap:14px;">
+      <span>Fill empty slots with AI bots</span>
+      <button class="btn small ${room.fillBots?"":"secondary"}" onclick="toggleBots()">${room.fillBots?"ON":"OFF"}</button></div>
+      <button class="btn" style="width:100%;margin-top:8px;" onclick="startOnline()">▶ START MATCH</button>`;
+    wm.textContent=room.fillBots?"":"AI bots are OFF — only the players in this room will play.";
+  } else { hc.innerHTML=""; wm.textContent="Waiting for the host to start…"; }
+}
+
+function setupOnlineGame(m){
+  resizeCanvas();
+  const cx=canvas.width/2, cy=canvas.height/2;
+  G={ online:true, cx, cy, mode:m.mode, arena:equippedCos("arena").value, shake:0, over:false,
+      zone:{x:cx,y:cy,r:90}, obstacles:m.obstacles.map(o=>({x:cx+o.x,y:cy+o.y,r:o.r})),
+      entities:[], projectiles:[], particles:[], floats:[], powerups:[], coinsEarned:0, player:null };
+  prevEntById={}; playerTrail=[];
+  document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[m.mode].label+" · ONLINE";
+  show("gameScreen"); startNetInput();
+}
+
+function onState(m){
+  if(!G||!G.online) return;
+  const cx=G.cx, cy=G.cy;
+  G.mode=m.mode; G.time=m.time;
+  G.zone={x:cx+m.zone.x, y:cy+m.zone.y, r:m.zone.r};
+  // detect events vs previous snapshot for particles/floats/sound
+  for(const e of m.entities){
+    const pe=prevEntById[e.id];
+    if(pe){
+      if(e.hp<pe.hp-0.5){ spawnParticles(cx+e.x,cy+e.y,"#ff5252",6); if(e.id===myId){ shake(6); SFX.hit(); } }
+      if(e.dead&&!pe.dead){ spawnParticles(cx+e.x,cy+e.y,e.color,24); shake(8); SFX.ko(); floatText(cx+e.x,cy+e.y,"KO!","#ffd33d"); }
+    }
+    prevEntById[e.id]=e;
+  }
+  // build render entities
+  G.entities=m.entities.map(e=>({ id:e.id, name:e.name, color:e.color, isPlayer:e.id===myId,
+    x:cx+e.x, y:cy+e.y, r:e.r, angle:e.angle, hp:e.hp, maxHp:e.maxHp, dead:e.dead,
+    score:e.score, kos:e.kos, buffs:e.buffs, dashTimer:e.dashTimer, dashCd:e.dashCd, trail:[] }));
+  G.player=G.entities.find(e=>e.isPlayer)||null;
+  if(G.player&&!G.player.dead){ playerTrail.push({x:G.player.x,y:G.player.y}); if(playerTrail.length>12) playerTrail.shift(); G.player.trail=playerTrail; }
+  else playerTrail=[];
+  G.projectiles=m.projectiles.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r,
+    color:p.ownerId===myId?equippedCos("projectile").value:p.color }));
+  G.powerups=m.powerups.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r, type:p.type, life:p.life }));
+  if(G.player) G.coinsEarned=Math.round(G.player.kos*15*statVal("coinMult"));
+  updateHUD();
+}
+
+function onEnd(m){
+  stopNetInput();
+  const me=m.results.find(r=>r.id===myId);
+  if(me){
+    const won=me.place===1 && me.score>0;
+    const coinMult=statVal("coinMult");
+    let coins=Math.round((won?75:25)*coinMult)+me.kos*Math.round(15*coinMult);
+    let xp=50+me.kos*10+(won?50:0);
+    addCoins(coins);
+    if(won){ save.wins++; save.rankPoints+=50+Math.round(me.score/2); }
+    else   { save.losses++; save.rankPoints+=10+Math.round(me.score/4); }
+    save.kos+=me.kos;
+    const leveled=addXp(xp);
+    if(me.score>save.bestScore) save.bestScore=me.score;
+    save.history.unshift({win, score:me.score, kos:me.kos, coins, mode:(G?ZONE_MODES[G.mode].label:"Online")+" (online)"});
+    save.history=save.history.slice(0,10);
+    const earned=checkAchievements(); saveSave();
+    document.getElementById("resultTitle").textContent=won?"VICTORY":"DEFEAT";
+    document.getElementById("resultTitle").style.color=won?"var(--good)":"var(--bad)";
+    document.getElementById("rPlace").textContent=ordinal(me.place);
+    document.getElementById("rScore").textContent=me.score;
+    document.getElementById("rKos").textContent=me.kos;
+    document.getElementById("rCoins").textContent="+"+coins;
+    document.getElementById("rXp").textContent="+"+xp;
+    const r=currentRank(); const rr=document.getElementById("rRank"); rr.textContent=r.name; rr.style.color=r.color;
+    document.getElementById("levelUp").style.display=leveled?"block":"none";
+    (won?SFX.win:SFX.lose)();
+    if(earned.length) setTimeout(()=>toast("🏆 "+earned.join(", ")),600);
+  }
+  setResultButtons();
+  show("resultScreen");
+}
+
+// Build the results-screen buttons depending on mode (local vs online).
+function setResultButtons(){
+  const c=document.getElementById("resultBtns");
+  if(online){
+    c.innerHTML=`${isHost?'<button class="btn" onclick="rematchOnline()">🔁 REMATCH</button>':""}
+      <button class="btn secondary" onclick="backToLobby()">🏠 LOBBY</button>
+      <button class="btn secondary" onclick="leaveRoom()">EXIT</button>`;
+  } else {
+    c.innerHTML=`<button class="btn" onclick="startMatch()">🔁 REMATCH</button>
+      <button class="btn secondary" onclick="show('upgradeScreen');renderUpgrades()">⚡ UPGRADES</button>
+      <button class="btn secondary" onclick="show('menuScreen');renderMenu()">🏠 MENU</button>`;
+  }
+}
+
+// Gather local input and ship it to the server ~30x/sec.
+function startNetInput(){ inMatch=true; if(netInputTimer) clearInterval(netInputTimer); netInputTimer=setInterval(sendInput,33); }
+function stopNetInput(){ inMatch=false; if(netInputTimer) clearInterval(netInputTimer); netInputTimer=null; }
+function sendInput(){
+  if(!online||!ws||ws.readyState!==1||!G||!G.player) return;
+  let dx=0,dy=0;
+  if(touch.move.active){ dx=touch.move.dx; dy=touch.move.dy; }
+  else { if(keys["w"])dy-=1; if(keys["s"])dy+=1; if(keys["a"])dx-=1; if(keys["d"])dx+=1;
+    const l=Math.hypot(dx,dy); if(l>0){ dx/=l; dy/=l; } }
+  let angle, shoot;
+  if(touch.aim.active){ angle=touch.aim.ang; shoot=touch.aim.shoot; }
+  else { const mwy=unprojY(mouse.y); angle=Math.atan2(mwy-G.player.y, mouse.x-G.player.x); shoot=mouse.down; }
+  let dash=false; if(keys[" "]||touch.dashReq){ dash=true; touch.dashReq=false; }
+  if(shoot && performance.now()-lastShootSfx>240){ SFX.shoot(); lastShootSfx=performance.now(); }
+  send({t:"input", mvx:dx, mvy:dy, angle, shoot, dash});
+}
 
 /* ---- boot ---- */
 refreshSettingsUI(); renderMenu(); saveSave();
