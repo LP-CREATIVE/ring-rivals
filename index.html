@@ -67,9 +67,10 @@ body{
 .tag.equipped{background:rgba(0,229,255,.15);color:var(--accent);}
 .tag.locked{background:rgba(255,82,82,.12);color:var(--bad);}
 #gameScreen{padding:0;}
-#gameWrap{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
-#game{background:#070b14;display:block;}
-#hud{position:absolute;inset:0;pointer-events:none;font-weight:700;}
+#gameWrap{position:relative;width:100%;height:100%;overflow:hidden;}
+#webgl{position:absolute;inset:0;z-index:0;}
+#game{position:absolute;inset:0;z-index:1;background:transparent;display:block;}
+#hud{position:absolute;inset:0;pointer-events:none;font-weight:700;z-index:2;}
 .hud-top{position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;}
 .hud-timer{font-size:34px;font-weight:900;text-shadow:0 0 18px rgba(0,229,255,.5);}
 .hud-obj{font-size:14px;color:var(--accent);margin-top:2px;}
@@ -287,6 +288,7 @@ body{
 
 <div id="toast" class="toast"></div>
 
+<script src="three.min.js"></script>
 <script>
 /* ============================================================================
    RING RIVALS — single-file prototype
@@ -745,7 +747,7 @@ function shake(amt){ if(save.settings.shake) G.shake=Math.min(G.shake+amt,18); }
 /* ===========================================================================
    7. PHYSICS / COLLISION / OBSTACLES
    =========================================================================== */
-function resizeCanvas(){ canvas.width=Math.min(window.innerWidth,1100); canvas.height=Math.min(window.innerHeight,760); }
+function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; if(typeof resize3D==="function") resize3D(); }
 window.addEventListener("resize",()=>{ if(G){ resizeCanvas(); G.cx=canvas.width/2; G.cy=canvas.height/2; }});
 
 // Distance from point P to segment AB (used for line-of-sight + projectile/obstacle).
@@ -916,6 +918,7 @@ function startMatch(){
   G.startCount=G.entities.length;
   moveZone();
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[mode].label+" · bots ×"+G.diff.toFixed(2);
+  init3D();
   show("gameScreen");
 }
 function moveZone(){
@@ -1074,8 +1077,10 @@ function controlPlayer(e,dt){
   if(touch.move.active){ dx=touch.move.dx; dy=touch.move.dy; }
   else { if(keys["w"])dy-=1; if(keys["s"])dy+=1; if(keys["a"])dx-=1; if(keys["d"])dx+=1;
     const l=Math.hypot(dx,dy); if(l>0){ dx/=l; dy/=l; } }
-  // aim
-  if(touch.aim.active){ e.angle=touch.aim.ang; } else { const mwy=unprojY(mouse.y); e.angle=Math.atan2(mwy-e.y, mouse.x-e.x); }
+  // aim (3D: raycast mouse onto the ground plane; fallback: 2D unproject)
+  if(touch.aim.active){ e.angle=touch.aim.ang; }
+  else if(R3){ const t=aimSimPoint(); if(t) e.angle=Math.atan2(t.sy-e.y, t.sx-e.x); }
+  else { const mwy=unprojY(mouse.y); e.angle=Math.atan2(mwy-e.y, mouse.x-e.x); }
   // movement (locked during dash end lag, slowed while charging the railgun)
   if(e.dashEndLag<=0){ const sp=e.speed*(e.charging?(w.slowMul||0.5):1); e.vx+=dx*sp*0.25; e.vy+=dy*sp*0.25;
     const cur=Math.hypot(e.vx,e.vy); if(cur>sp){ e.vx=e.vx/cur*sp; e.vy=e.vy/cur*sp; } }
@@ -1488,6 +1493,139 @@ function drawTouchControls(){
 }
 
 /* ===========================================================================
+   10b. 3D RENDERER (Three.js) — renders the same sim state `G` in real 3D.
+   World coords are sim coords minus (G.cx,G.cy); ground plane is XZ at y=0.
+   The 2D #game canvas stays as a transparent OVERLAY (floats/HUD/minimap).
+   =========================================================================== */
+let R3=null;
+function init3D(){
+  if(R3 || !window.THREE) return;
+  const renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.domElement.id="webgl";
+  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+  const wrap=document.getElementById("gameWrap"); wrap.insertBefore(renderer.domElement, wrap.firstChild);
+  const scene=new THREE.Scene(); scene.background=new THREE.Color(0x05070d); scene.fog=new THREE.Fog(0x05070d, ARENA_R*1.5, ARENA_R*3.4);
+  const camera=new THREE.PerspectiveCamera(55, 16/9, 1, 6000); camera.position.set(0,560,360);
+  scene.add(new THREE.HemisphereLight(0x9fb4ff,0x16203b,0.95));
+  const dir=new THREE.DirectionalLight(0xffffff,1.0); dir.position.set(300,720,220); dir.castShadow=true;
+  dir.shadow.mapSize.set(1024,1024); const sc=dir.shadow.camera; sc.left=-ARENA_R; sc.right=ARENA_R; sc.top=ARENA_R; sc.bottom=-ARENA_R; sc.near=1; sc.far=2200; scene.add(dir);
+  const ground=new THREE.Mesh(new THREE.CircleGeometry(ARENA_R,72), new THREE.MeshStandardMaterial({color:0x0f1730, roughness:0.95})); ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(ARENA_R,5,10,96), new THREE.MeshBasicMaterial({color:0x00e5ff})); ring.rotation.x=-Math.PI/2; scene.add(ring);
+  R3={renderer,scene,camera,ground,ring,ent:new Map(),proj:[],pu:[],obs:[],zone:null,zoneRing:null,ray:new THREE.Raycaster(),plane:new THREE.Plane(new THREE.Vector3(0,1,0),0),obsSig:null,_arena:null};
+  resize3D();
+}
+function resize3D(){ if(!R3) return; R3.renderer.setSize(canvas.width,canvas.height); R3.camera.aspect=canvas.width/canvas.height; R3.camera.updateProjectionMatrix(); }
+function makeFighter(color){
+  const g=new THREE.Group();
+  const bodyMat=new THREE.MeshStandardMaterial({color, roughness:0.55, metalness:0.1});
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(11,14,24,14), bodyMat); body.position.y=22; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(9,16,12), new THREE.MeshStandardMaterial({color:0xf4cda4,roughness:0.7})); head.position.y=42; head.castShadow=true; g.add(head);
+  const legMat=new THREE.MeshStandardMaterial({color:0x222a3a});
+  const l1=new THREE.Mesh(new THREE.CylinderGeometry(4,4,12,8),legMat); l1.position.set(-6,6,0); l1.castShadow=true; g.add(l1);
+  const l2=l1.clone(); l2.position.x=6; g.add(l2);
+  const aim=new THREE.Group(); aim.position.y=22; g.add(aim);
+  const gun=new THREE.Mesh(new THREE.BoxGeometry(20,5,5), new THREE.MeshStandardMaterial({color:0x1d222e})); gun.position.set(14,0,0); aim.add(gun);
+  g.userData={bodyMat,aim,color};
+  return g;
+}
+function syncObstacles(){
+  const sig=G.obstacles.map(o=>((o.x)|0)+","+((o.y)|0)+","+((o.r)|0)).join(";");
+  if(R3.obsSig===sig) return; R3.obsSig=sig;
+  for(const m of R3.obs) R3.scene.remove(m); R3.obs=[];
+  for(const o of G.obstacles){ const h=72;
+    const m=new THREE.Mesh(new THREE.CylinderGeometry(o.r,o.r,h,20), new THREE.MeshStandardMaterial({color:0x2a3658, roughness:0.85}));
+    m.position.set(o.x-G.cx, h/2, o.y-G.cy); m.castShadow=true; m.receiveShadow=true; R3.scene.add(m); R3.obs.push(m); }
+}
+function syncEntities(){
+  const seen=new Set();
+  for(const e of G.entities){
+    const key=e.id||e.name;
+    if(e.dead){ const mm=R3.ent.get(key); if(mm) mm.visible=false; continue; }
+    seen.add(key);
+    let m=R3.ent.get(key); if(!m){ m=makeFighter(e.color); R3.scene.add(m); R3.ent.set(key,m); }
+    m.visible=true; m.position.set(e.x-G.cx, 0, e.y-G.cy); m.userData.aim.rotation.y=-e.angle;
+    if(m.userData.color!==e.color){ m.userData.bodyMat.color.set(e.color); m.userData.color=e.color; }
+  }
+  for(const [k,m] of R3.ent){ if(!seen.has(k)) m.visible=false; }
+}
+function syncProjectiles(){
+  const list=G.projectiles;
+  for(let i=0;i<list.length;i++){
+    let m=R3.proj[i]; if(!m){ m=new THREE.Mesh(new THREE.SphereGeometry(1,8,8), new THREE.MeshBasicMaterial()); R3.scene.add(m); R3.proj[i]=m; }
+    const p=list[i]; m.visible=true; m.material.color.set(p.color||"#fff"); m.scale.setScalar(p.r||6); m.position.set(p.x-G.cx, 18, p.y-G.cy);
+  }
+  for(let i=list.length;i<R3.proj.length;i++) R3.proj[i].visible=false;
+}
+function syncPowerups(){
+  const list=G.powerups||[];
+  for(let i=0;i<list.length;i++){
+    let m=R3.pu[i]; if(!m){ m=new THREE.Mesh(new THREE.IcosahedronGeometry(13,0), new THREE.MeshStandardMaterial({roughness:0.4})); m.castShadow=true; R3.scene.add(m); R3.pu[i]=m; }
+    const p=list[i], col=(POWERUP_TYPES[p.type]||{}).color||"#fff"; m.visible=true;
+    m.material.color.set(col); if(m.material.emissive){ m.material.emissive.set(col); m.material.emissiveIntensity=0.5; }
+    m.position.set(p.x-G.cx, 20+Math.sin(Date.now()/300+i)*4, p.y-G.cy); m.rotation.y+=0.06;
+  }
+  for(let i=list.length;i<R3.pu.length;i++) R3.pu[i].visible=false;
+}
+function syncZone(){
+  if(!R3.zone){
+    R3.zone=new THREE.Mesh(new THREE.CylinderGeometry(1,1,6,44), new THREE.MeshBasicMaterial({transparent:true,opacity:0.2})); R3.scene.add(R3.zone);
+    R3.zoneRing=new THREE.Mesh(new THREE.TorusGeometry(1,2,8,52), new THREE.MeshBasicMaterial()); R3.zoneRing.rotation.x=-Math.PI/2; R3.scene.add(R3.zoneRing);
+  }
+  const col=G.mode==="koth"?0xffd33d:G.mode==="shrink"?0xff3d81:0x00e5ff;
+  R3.zone.material.color.setHex(col); R3.zoneRing.material.color.setHex(col);
+  R3.zone.position.set(G.zone.x-G.cx,3,G.zone.y-G.cy); R3.zone.scale.set(G.zone.r,1,G.zone.r);
+  R3.zoneRing.position.set(G.zone.x-G.cx,1,G.zone.y-G.cy); R3.zoneRing.scale.set(G.zone.r,G.zone.r,1);
+}
+function updateCamera(){
+  const p=G.player; const px=p?p.x-G.cx:0, pz=p?p.y-G.cy:0;
+  R3.camera.position.lerp(new THREE.Vector3(px,560,pz+360),0.12);
+  R3.camera.lookAt(px,0,pz+30);
+}
+function applyArena(){
+  if(R3._arena===G.arena) return; R3._arena=G.arena;
+  const c = G.arena==="dark"?[0x0b1020,0x3a7bd5,0x04060c] : G.arena==="retro"?[0x1c1133,0x9b4dff,0x0c0718] : [0x0f1730,0x00e5ff,0x05070d];
+  R3.ground.material.color.setHex(c[0]); R3.ring.material.color.setHex(c[1]);
+  R3.scene.fog.color.setHex(c[2]); R3.scene.background.setHex(c[2]);
+}
+function aimSimPoint(){
+  if(!R3) return null;
+  const ndcX=(mouse.x/canvas.width)*2-1, ndcY=-(mouse.y/canvas.height)*2+1;
+  R3.ray.setFromCamera({x:ndcX,y:ndcY}, R3.camera);
+  const pt=new THREE.Vector3(); if(!R3.ray.ray.intersectPlane(R3.plane,pt)) return null;
+  return { sx:G.cx+pt.x, sy:G.cy+pt.z };
+}
+function projectSim(sx,sy,wy){
+  const v=new THREE.Vector3(sx-G.cx, wy||0, sy-G.cy); v.project(R3.camera);
+  return { x:(v.x*0.5+0.5)*canvas.width, y:(-v.y*0.5+0.5)*canvas.height, vis:v.z<1 };
+}
+function render3D(){
+  if(!R3) return;
+  applyArena(); syncObstacles(); syncEntities(); syncProjectiles(); syncPowerups(); syncZone(); updateCamera();
+  R3.renderer.render(R3.scene, R3.camera);
+}
+function drawNamePlate(e,sx,sy){
+  ctx.fillStyle="#fff"; ctx.font="bold 12px Segoe UI"; ctx.textAlign="center"; ctx.fillText(e.name,sx,sy);
+  const bw=42; ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(sx-bw/2,sy+4,bw,5);
+  ctx.fillStyle=e.hp>e.maxHp*0.3?"#27e08a":"#ff5252"; ctx.fillRect(sx-bw/2,sy+4,bw*Math.max(0,e.hp/e.maxHp),5);
+  const rf=e.reloadF!=null?e.reloadF:(e.reloadT>0?e.reloadT/((curWeapon(e).reload)||1):0);
+  if(rf>0){ ctx.fillStyle="#00e5ff"; ctx.font="bold 10px Segoe UI"; ctx.fillText("RELOADING",sx,sy-10); }
+}
+// 2D overlay on the transparent #game canvas: world-space fx projected via the 3D camera.
+function renderOverlay(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(const pt of G.particles){ const s=projectSim(pt.x,pt.y,16); if(!s.vis) continue; ctx.globalAlpha=Math.max(0,pt.life); ctx.fillStyle=pt.color; ctx.beginPath(); ctx.arc(s.x,s.y,Math.max(1,pt.r),0,7); ctx.fill(); }
+  ctx.globalAlpha=1;
+  for(const e of G.entities){ if(e.dead) continue; const s=projectSim(e.x,e.y,82); if(s.vis) drawNamePlate(e,s.x,s.y); }
+  for(const f of G.floats){ const s=projectSim(f.x,f.y,46); if(!s.vis) continue; ctx.globalAlpha=Math.max(0,f.life); ctx.fillStyle=f.color; ctx.font="bold 16px Segoe UI"; ctx.textAlign="center"; ctx.fillText(f.text,s.x,s.y); }
+  ctx.globalAlpha=1;
+  if(G.scorePopTimer>0 && G.scorePopVal>=1 && G.player && !G.player.dead){ const s=projectSim(G.player.x,G.player.y,100);
+    if(s.vis){ const a=Math.min(1,G.scorePopTimer/0.9); ctx.globalAlpha=a; ctx.font="900 "+(24+Math.min(16,G.scorePopVal*0.5))+"px Segoe UI"; ctx.fillStyle="#ffd33d"; ctx.shadowColor="#ffd33d"; ctx.shadowBlur=18; ctx.textAlign="center"; ctx.fillText("+"+Math.round(G.scorePopVal),s.x,s.y); ctx.shadowBlur=0; ctx.globalAlpha=1; } }
+  drawMinimap();
+  if(IS_TOUCH) drawTouchControls();
+}
+
+/* ===========================================================================
    11. MAIN LOOP
    =========================================================================== */
 let last=performance.now();
@@ -1495,8 +1633,9 @@ function loop(now){
   let dt=(now-last)/1000; last=now; if(dt>0.05) dt=0.05;
   try{
     if(G && document.getElementById("gameScreen").classList.contains("active")){
-      if(G.online){ tickEffects(dt); updateScorePop(dt); render(); }     // online: render server state + local fx
-      else if(!G.over){ update(dt); updateScorePop(dt); render(); }      // local: full simulation
+      if(G.online){ tickEffects(dt); updateScorePop(dt); }     // online: server state + local fx
+      else if(!G.over){ update(dt); updateScorePop(dt); }      // local: full simulation
+      if(R3){ render3D(); renderOverlay(); } else { render(); }  // 3D world + 2D overlay (fallback: old 2D)
     }
   }catch(err){ console.error("loop error:",err); }          // never let one bad frame freeze the game
   requestAnimationFrame(loop);
@@ -1683,6 +1822,7 @@ function setupOnlineGame(m){
   _cdPrev=-1; document.getElementById("countdown").style.display="none";
   document.getElementById("specBanner").style.display="none";
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[m.mode].label+" · ONLINE";
+  init3D();
   show("gameScreen"); startNetInput();
 }
 
@@ -1807,7 +1947,9 @@ function sendInput(){
     const l=Math.hypot(dx,dy); if(l>0){ dx/=l; dy/=l; } }
   let angle, shoot;
   if(touch.aim.active){ angle=touch.aim.ang; shoot=touch.aim.shoot; }
-  else { const mwy=unprojY(mouse.y); angle=Math.atan2(mwy-G.player.y, mouse.x-G.player.x); shoot=mouse.down; }
+  else { shoot=mouse.down;
+    if(R3){ const t=aimSimPoint(); angle = t?Math.atan2(t.sy-G.player.y,t.sx-G.player.x):G.player.angle; }
+    else { const mwy=unprojY(mouse.y); angle=Math.atan2(mwy-G.player.y, mouse.x-G.player.x); } }
   let dash=false; if(keys[" "]||touch.dashReq){ dash=true; touch.dashReq=false; }
   let reload=false; if(keys["r"]||touch.reloadReq){ reload=true; touch.reloadReq=false; keys["r"]=false; }
   // local fire SFX on the rising edge only (charge weapon stays quiet until release)

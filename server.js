@@ -16,6 +16,14 @@ const INDEX = path.join(__dirname, "index.html");
 /* ---- HTTP: serve the client so the Railway URL works as the full game too ---- */
 const server = http.createServer((req, res) => {
   if (req.url === "/health") { res.writeHead(200); res.end("ok"); return; }
+  if (req.url === "/three.min.js") {
+    fs.readFile(path.join(__dirname, "three.min.js"), (err, data) => {
+      if (err) { res.writeHead(404); res.end("not found"); return; }
+      res.writeHead(200, { "Content-Type": "application/javascript", "Cache-Control": "public, max-age=86400" });
+      res.end(data);
+    });
+    return;
+  }
   // everything else serves the game client
   fs.readFile(INDEX, (err, data) => {
     if (err) { res.writeHead(500); res.end("index.html not found"); return; }
