@@ -603,7 +603,7 @@ canvas.addEventListener("touchcancel",endTouch,{passive:false});
    =========================================================================== */
 const BOT_NAMES=["Bolt","Hex","Nova","Tank","Viper"];
 const BOT_COLORS=["#ff5252","#27e08a","#ffa726","#b388ff","#26c6da"];
-const MATCH_TIME=120, SCORE_TO_WIN=100, ZONE_PER_SEC=8, PROJ_DMG=12, ARENA_R=440;
+const MATCH_TIME=120, SCORE_TO_WIN=150, ZONE_PER_SEC=8, PROJ_DMG=12, ARENA_R=440, LIVES=3;
 
 // ---- fake-3D top-down projection (vertical foreshorten) ----
 // Gameplay stays in flat 2D world coords; only RENDERING is tilted.
@@ -633,7 +633,7 @@ class Entity{
     this.color=color;this.name=name;this.isPlayer=!!isPlayer;
     this.diff=1;                          // bot difficulty multiplier (1 for player)
     this.maxHp=isPlayer?statVal("health"):100; this.hp=this.maxHp;
-    this.score=0;this.kos=0;this.dead=false;this.respawn=0;
+    this.score=0;this.kos=0;this.dead=false;this.respawn=0;this.lives=LIVES;this.eliminated=false;
     this.angle=0;this.dashTimer=0;this.shootTimer=0;
     this.dashV=0;this.dashDx=0;this.dashDy=0;
     this.trail=[]; this.aiState={dashCd:Math.random()*2};
@@ -714,9 +714,11 @@ function damage(target,amount,src){
   if(target.hp<=0) koEntity(target,src);
 }
 function koEntity(target,src){
-  target.dead=true; target.respawn=2.5;
+  target.dead=true; target.lives--;
   spawnParticles(target.x,target.y,target.color,28); shake(10); SFX.ko();
   floatText(target.x,target.y,"KO!","#ffd33d");
+  if(target.lives<=0){ target.eliminated=true; target.respawn=Infinity; floatText(target.x,target.y+16,"ELIMINATED","#ff5252"); }
+  else target.respawn=1.5;
   if(src){ src.kos++;
     if(src.isPlayer){ const reward=Math.round(15*statVal("coinMult")); G.coinsEarned+=reward; addCoins(reward);
       floatText(src.x,src.y-30,"+"+reward+" 🪙","#ffd33d"); }
@@ -810,6 +812,7 @@ function startMatch(){
     b.diff=G.diff; b.maxHp=100; b.hp=100;
     G.entities.push(b);
   }
+  G.startCount=G.entities.length;
   moveZone();
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[mode].label+" · bots ×"+G.diff.toFixed(2);
   show("gameScreen");
@@ -826,9 +829,9 @@ function moveZone(){
 }
 function endMatch(){
   if(G.over) return; G.over=true;
-  const ranked=[...G.entities].sort((a,b)=>b.score-a.score);
+  const ranked=[...G.entities].sort((a,b)=>(a.eliminated-b.eliminated)||(b.score-a.score));
   const place=ranked.indexOf(G.player)+1;
-  const won=place===1 && G.player.score>0;
+  const won=place===1 && !G.player.eliminated;
   const coinMult=statVal("coinMult");
   let coins=Math.round((won?75:25)*coinMult)+G.player.kos*Math.round(15*coinMult);
   let xp=50+G.player.kos*10+(won?50:0);
@@ -875,7 +878,9 @@ function update(dt){
   for(const p of G.powerups){ p.life-=dt; if(p.life<=0) p.dead=true; }
 
   for(const e of G.entities){
-    if(e.dead){ e.respawn-=dt;
+    if(e.dead){
+      if(e.eliminated) continue;                  // out of lives — no respawn
+      e.respawn-=dt;
       if(e.respawn<=0){ e.dead=false; e.hp=e.maxHp; const a=Math.random()*Math.PI*2;
         e.x=G.cx+Math.cos(a)*120; e.y=G.cy+Math.sin(a)*120; e.vx=e.vy=0; e.buffs.speed=e.buffs.rapid=0; e.holdStreak=0; }
       continue; }
@@ -904,7 +909,7 @@ function update(dt){
     const zdist=Math.hypot(e.x-G.zone.x,e.y-G.zone.y);
     if(zdist<G.zone.r && !e.dead){
       let modeMult=1;
-      if(G.mode==="koth"){ e.holdStreak+=dt; modeMult=1+Math.min(e.holdStreak/8,1.5); } // up to 2.5x for staying
+      if(G.mode==="koth"){ e.holdStreak+=dt; modeMult=1+Math.min(e.holdStreak/12,1.0); } // up to 2x for staying
       const mult=(e.isPlayer?statVal("zoneMult"):1)*modeMult;
       e.score+=ZONE_PER_SEC*mult*dt;
       if(Math.random()<0.15) spawnParticles(e.x,e.y,e.isPlayer?"#00e5ff":e.color,1);
@@ -941,6 +946,8 @@ function update(dt){
   G.particles=G.particles.filter(p=>p.life>0);
   for(const f of G.floats){ f.y+=f.dy; f.life-=dt*1.1; }
   G.floats=G.floats.filter(f=>f.life>0);
+  // last player standing wins (only when the match started with 2+ fighters)
+  if(G.startCount>=2 && G.entities.filter(e=>!e.eliminated).length<=1){ endMatch(); return; }
   G.shake*=0.85;
   updateHUD();
 }
@@ -973,9 +980,13 @@ function updateHUD(){
   document.getElementById("hudDash").style.width=Math.min(100,Math.max(0,100*(1-G.player.dashTimer/G.player.dashCd)))+"%";
   const lead=[...G.entities].sort((a,b)=>b.score-a.score)[0];
   document.getElementById("hudObj").textContent=(lead===G.player?"You lead! ":lead.name+" leads. ")+ZONE_MODES[G.mode].obj;
-  const ranked=[...G.entities].sort((a,b)=>b.score-a.score);
-  document.getElementById("lboardRows").innerHTML=ranked.map(e=>
-    `<div class="lrow"><span class="nm"><span class="dot" style="background:${e.color}"></span>${e.name}${e.dead?" 💀":""}</span><b>${Math.round(e.score)}</b></div>`).join("");
+  const ranked=[...G.entities].sort((a,b)=>(a.eliminated-b.eliminated)||(b.score-a.score));
+  document.getElementById("lboardRows").innerHTML=ranked.map(e=>{
+    const stat=e.eliminated
+      ? '<span style="color:var(--bad);font-size:11px">OUT</span>'
+      : '<span style="color:#ff6b8a;font-size:12px" title="lives">'+"♥".repeat(Math.max(0,e.lives))+'</span>';
+    return `<div class="lrow"><span class="nm"><span class="dot" style="background:${e.color}"></span>${e.name} ${stat}</span><b>${Math.round(e.score)}</b></div>`;
+  }).join("");
 }
 
 /* ===========================================================================
@@ -1142,10 +1153,12 @@ function drawTouchControls(){
 let last=performance.now();
 function loop(now){
   let dt=(now-last)/1000; last=now; if(dt>0.05) dt=0.05;
-  if(G && document.getElementById("gameScreen").classList.contains("active")){
-    if(G.online){ tickEffects(dt); render(); }           // online: render server state + local fx only
-    else if(!G.over){ update(dt); render(); }             // local: full simulation
-  }
+  try{
+    if(G && document.getElementById("gameScreen").classList.contains("active")){
+      if(G.online){ tickEffects(dt); render(); }          // online: render server state + local fx only
+      else if(!G.over){ update(dt); render(); }            // local: full simulation
+    }
+  }catch(err){ console.error("loop error:",err); }          // never let one bad frame freeze the game
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -1274,7 +1287,7 @@ function onState(m){
   // build render entities
   G.entities=m.entities.map(e=>({ id:e.id, name:e.name, color:e.color, isPlayer:e.id===myId,
     x:cx+e.x, y:cy+e.y, r:e.r, angle:e.angle, hp:e.hp, maxHp:e.maxHp, dead:e.dead,
-    score:e.score, kos:e.kos, buffs:e.buffs, dashTimer:e.dashTimer, dashCd:e.dashCd, trail:[] }));
+    score:e.score, kos:e.kos, lives:e.lives, eliminated:e.eliminated, buffs:e.buffs, dashTimer:e.dashTimer, dashCd:e.dashCd, trail:[] }));
   G.player=G.entities.find(e=>e.isPlayer)||null;
   if(G.player&&!G.player.dead){ playerTrail.push({x:G.player.x,y:G.player.y}); if(playerTrail.length>12) playerTrail.shift(); G.player.trail=playerTrail; }
   else playerTrail=[];

@@ -29,8 +29,9 @@ const server = http.createServer((req, res) => {
    World is centered at (0,0); arena radius ARENA_R. Clients re-center on canvas.
    =========================================================================== */
 const ARENA_R = 440, TICK = 1 / 30;
-const MATCH_TIME = 120, SCORE_TO_WIN = 100, ZONE_PER_SEC = 8, PROJ_DMG = 12;
+const MATCH_TIME = 120, SCORE_TO_WIN = 150, ZONE_PER_SEC = 8, PROJ_DMG = 12;
 const TOTAL_SLOTS = 6;            // humans + bots fill up to this many
+const LIVES = 3;                  // lives per entity per match
 const BOT_DIFF = 1.1;
 const BOT_NAMES = ["Bolt", "Hex", "Nova", "Tank", "Viper"];
 const BOT_COLORS = ["#ff5252", "#27e08a", "#ffa726", "#b388ff", "#26c6da"];
@@ -68,7 +69,7 @@ function makeEntity(opts) {
     stats: opts.stats || null,
     x: opts.x, y: opts.y, vx: 0, vy: 0, r: 18, angle: 0,
     maxHp: opts.maxHp || 100, hp: opts.maxHp || 100,
-    score: 0, kos: 0, dead: false, respawn: 0,
+    score: 0, kos: 0, dead: false, respawn: 0, lives: LIVES, eliminated: false,
     dashTimer: 0, shootTimer: 0, dashV: 0, dashDx: 0, dashDy: 0, dashCd: opts.dashCd || 2.5,
     buffs: { speed: 0, rapid: 0 }, holdStreak: 0,
     aiState: { dashCd: Math.random() * 2 },
@@ -126,6 +127,7 @@ function startGame(room) {
       }));
     }
   }
+  g.startCount = g.entities.length;
   room.game = g;
   moveZone(g);
   broadcast(room, { t: "start", mode, obstacles: g.obstacles });
@@ -159,7 +161,9 @@ function damage(g, target, amount, srcId) {
   if (target.dead) return;
   target.hp -= amount;
   if (target.hp <= 0) {
-    target.dead = true; target.respawn = 2.5;
+    target.dead = true; target.lives--;
+    if (target.lives <= 0) { target.eliminated = true; target.respawn = Infinity; }
+    else target.respawn = 1.5;
     const src = g.entities.find(e => e.id === srcId && e !== target);
     if (src) src.kos++;
   }
@@ -196,6 +200,10 @@ function spawnPowerUp(g) {
 }
 
 function tick(room) {
+  // never let a sim exception crash the whole server (would freeze every client)
+  try { tickInner(room); } catch (e) { console.error("tick error:", e); }
+}
+function tickInner(room) {
   const g = room.game; if (!g || g.over) return;
   const dt = TICK;
   g.time -= dt;
@@ -213,6 +221,7 @@ function tick(room) {
 
   for (const e of g.entities) {
     if (e.dead) {
+      if (e.eliminated) continue;                 // out of lives — no respawn
       e.respawn -= dt;
       if (e.respawn <= 0) { e.dead = false; e.hp = e.maxHp; const a = Math.random() * Math.PI * 2; e.x = Math.cos(a) * 120; e.y = Math.sin(a) * 120; e.vx = e.vy = 0; e.buffs.speed = e.buffs.rapid = 0; e.holdStreak = 0; }
       continue;
@@ -249,7 +258,7 @@ function tick(room) {
     const zd = Math.hypot(e.x - g.zone.x, e.y - g.zone.y);
     if (zd < g.zone.r) {
       let modeMult = 1;
-      if (g.mode === "koth") { e.holdStreak += dt; modeMult = 1 + Math.min(e.holdStreak / 8, 1.5); }
+      if (g.mode === "koth") { e.holdStreak += dt; modeMult = 1 + Math.min(e.holdStreak / 12, 1.0); }
       e.score += ZONE_PER_SEC * entZoneMult(e) * modeMult * dt;
       if (e.score >= SCORE_TO_WIN) { g.powerups = g.powerups.filter(p => !p.dead); return endGame(room); }
     } else e.holdStreak = 0;
@@ -279,11 +288,14 @@ function tick(room) {
     if (d < min && d > 0) { const ov = (min - d) / 2, nx = dx / d, ny = dy / d; a.x -= nx * ov; a.y -= ny * ov; b.x += nx * ov; b.y += ny * ov; }
   }
 
+  // last player standing wins (only when the match started with 2+ entities)
+  if (g.startCount >= 2 && g.entities.filter(e => !e.eliminated).length <= 1) return endGame(room);
+
   // broadcast state
   broadcast(room, {
     t: "state", time: g.time, mode: g.mode, over: false,
     zone: { x: g.zone.x, y: g.zone.y, r: g.zone.r },
-    entities: g.entities.map(e => ({ id: e.id, name: e.name, color: e.color, x: e.x, y: e.y, r: e.r, angle: e.angle, hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd })),
+    entities: g.entities.map(e => ({ id: e.id, name: e.name, color: e.color, x: e.x, y: e.y, r: e.r, angle: e.angle, hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, lives: e.lives, eliminated: e.eliminated, buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd })),
     projectiles: g.projectiles.map(p => ({ x: p.x, y: p.y, r: p.r, ownerId: p.ownerId, color: p.color })),
     powerups: g.powerups.map(p => ({ x: p.x, y: p.y, r: p.r, type: p.type, life: p.life })),
   });
@@ -293,8 +305,8 @@ function endGame(room) {
   const g = room.game; if (!g) return;
   g.over = true;
   if (room.loop) { clearInterval(room.loop); room.loop = null; }
-  const ranked = [...g.entities].sort((a, b) => b.score - a.score);
-  const results = ranked.map((e, idx) => ({ id: e.id, name: e.name, score: Math.round(e.score), kos: e.kos, place: idx + 1, isBot: e.isBot }));
+  const ranked = [...g.entities].sort((a, b) => (a.eliminated - b.eliminated) || (b.score - a.score));
+  const results = ranked.map((e, idx) => ({ id: e.id, name: e.name, score: Math.round(e.score), kos: e.kos, place: idx + 1, isBot: e.isBot, eliminated: e.eliminated }));
   broadcast(room, { t: "end", results });
   room.game = null;
   // detach entity refs and return everyone to the lobby
@@ -305,6 +317,9 @@ function endGame(room) {
 /* ===========================================================================
    WEBSOCKET HANDLERS
    =========================================================================== */
+process.on("uncaughtException", e => console.error("uncaughtException:", e));
+process.on("unhandledRejection", e => console.error("unhandledRejection:", e));
+
 const wss = new WebSocketServer({ server });
 wss.on("connection", (ws) => {
   ws.data = { id: null, room: null };
