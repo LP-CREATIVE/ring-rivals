@@ -59,6 +59,13 @@ function playerList(room) {
 function sendLobby(room) {
   broadcast(room, { t: "lobby", code: room.code, players: playerList(room), fillBots: room.fillBots });
 }
+// Summaries for the "browse open games" list (find a game by host name).
+function roomSummaries() {
+  return [...rooms.values()].map(r => {
+    const host = r.players.get(r.hostId);
+    return { code: r.code, title: (host ? host.name : "Game") + "'s Game", count: r.players.size, max: TOTAL_SLOTS, inGame: !!r.game };
+  });
+}
 
 /* ===========================================================================
    SIMULATION
@@ -327,6 +334,8 @@ wss.on("connection", (ws) => {
   ws.on("message", (raw) => {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     const d = ws.data;
+
+    if (m.t === "list") { send(ws, { t: "rooms", rooms: roomSummaries() }); return; }
 
     if (m.t === "create") {
       const code = makeCode();

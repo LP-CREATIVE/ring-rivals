@@ -100,7 +100,7 @@ body{
 .small-muted{color:var(--muted);font-size:13px;}
 .back-btn{position:absolute;top:18px;left:18px;}
 .ninput{width:100%;padding:12px 14px;margin:8px 0;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c1120;color:var(--text);font-size:15px;font-weight:600;text-align:center;text-transform:none;}
-#roomCode{font-size:48px;font-weight:900;letter-spacing:8px;color:var(--accent);margin:4px 0 14px;text-shadow:0 0 24px rgba(0,229,255,.4);}
+#roomCode{font-size:30px;font-weight:900;letter-spacing:1px;color:var(--accent);margin:4px 0 14px;text-shadow:0 0 24px rgba(0,229,255,.4);}
 .hist{background:var(--panel2);border-radius:12px;padding:12px 16px;margin-top:16px;text-align:left;}
 </style>
 </head>
@@ -194,18 +194,18 @@ body{
 
 <!-- ============================ ONLINE: LOBBY ENTRY ============================ -->
 <div id="onlineScreen" class="screen">
-  <button class="btn secondary small back-btn" onclick="show('menuScreen');renderMenu()">← Menu</button>
+  <button class="btn secondary small back-btn" onclick="closeOnline()">← Menu</button>
   <div class="panel" style="max-width:480px;text-align:center;">
     <h2 style="margin-top:0;">🌐 Play Online</h2>
-    <p class="small-muted">Create a room and share the 4-letter code, or join a friend's room.</p>
     <input id="playerNameInput" class="ninput" placeholder="Your name" maxlength="14" />
     <input id="serverUrl" class="ninput" placeholder="wss://your-server.up.railway.app" />
     <div id="netStatus" class="small-muted" style="min-height:18px;margin:6px 0;"></div>
-    <button class="btn" style="width:100%;margin-bottom:14px;" onclick="createRoom()">➕ CREATE ROOM</button>
-    <div style="display:flex;gap:8px;">
-      <input id="joinCode" class="ninput" style="flex:1;margin:0;letter-spacing:4px;text-transform:uppercase;" placeholder="CODE" maxlength="4" />
-      <button class="btn secondary" onclick="joinRoom()">JOIN</button>
+    <button class="btn" style="width:100%;margin-bottom:16px;" onclick="createRoom()">➕ CREATE GAME</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0;">
+      <span class="small-muted">Open games — tap to join</span>
+      <button class="btn small secondary" onclick="refreshList()">⟳ Refresh</button>
     </div>
+    <div id="gamesList" style="text-align:left;"></div>
   </div>
 </div>
 
@@ -213,7 +213,7 @@ body{
 <div id="roomScreen" class="screen">
   <button class="btn secondary small back-btn" onclick="leaveRoom()">← Leave</button>
   <div class="panel" style="max-width:480px;text-align:center;">
-    <div class="small-muted">Room code — share with friends</div>
+    <div class="small-muted">Lobby</div>
     <div id="roomCode"></div>
     <div id="roomPlayers" style="text-align:left;margin-bottom:16px;"></div>
     <div id="colorPicker" style="margin-bottom:16px;"></div>
@@ -816,6 +816,7 @@ function startMatch(){
       zone:{x:cx,y:cy,r:90,baseR:90,timer:12,maxTimer:12}, coinsEarned:0,
       arena:equippedCos("arena").value, puTimer:6, diff:botDifficulty() };
   G.obstacles=genObstacles();
+  G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0;
 
   const player=new Entity(cx, cy+150, equippedCos("character").value, "You", true);
   G.entities.push(player); G.player=player;
@@ -929,7 +930,6 @@ function update(dt){
       const mult=(e.isPlayer?statVal("zoneMult"):1)*modeMult;
       e.score+=ZONE_PER_SEC*mult*dt;
       if(Math.random()<0.15) spawnParticles(e.x,e.y,e.isPlayer?"#00e5ff":e.color,1);
-      if(e.isPlayer && Math.random()<dt*2) floatText(e.x,e.y-e.r-4, G.mode==="koth"?("×"+modeMult.toFixed(1)):"+score","#00e5ff");
       if(e.score>=SCORE_TO_WIN){ endMatch(); return; }
     } else e.holdStreak=0;
 
@@ -1039,6 +1039,7 @@ function render(){
   for(const f of G.floats){ ctx.globalAlpha=Math.max(0,f.life); ctx.fillStyle=f.color;
     ctx.font="bold 16px Segoe UI"; ctx.textAlign="center"; ctx.fillText(f.text,f.x,pY(f.y)-ENTITY_H); }
   ctx.globalAlpha=1;
+  drawScorePop();
 
   // directional arrow to zone (direction projected onto the tilted plane)
   if(G.player&&!G.player.dead){
@@ -1173,13 +1174,36 @@ function loop(now){
   let dt=(now-last)/1000; last=now; if(dt>0.05) dt=0.05;
   try{
     if(G && document.getElementById("gameScreen").classList.contains("active")){
-      if(G.online){ tickEffects(dt); render(); }          // online: render server state + local fx only
-      else if(!G.over){ update(dt); render(); }            // local: full simulation
+      if(G.online){ tickEffects(dt); updateScorePop(dt); render(); }     // online: render server state + local fx
+      else if(!G.over){ update(dt); updateScorePop(dt); render(); }      // local: full simulation
     }
   }catch(err){ console.error("loop error:",err); }          // never let one bad frame freeze the game
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+// Big "+N" popup over the local player while they're racking up zone points.
+function updateScorePop(dt){
+  if(!G) return;
+  const p=G.player;
+  if(p && !p.dead && !p.eliminated){
+    if(G._lastScore===undefined) G._lastScore=p.score;
+    const d=p.score-G._lastScore;
+    if(d>0.02){ G.scorePopVal=(G.scorePopVal||0)+d; G.scorePopTimer=0.9; }   // refresh while scoring
+    G._lastScore=p.score;
+  }
+  if(G.scorePopTimer>0){ G.scorePopTimer-=dt; if(G.scorePopTimer<=0) G.scorePopVal=0; }   // hide when it stops
+}
+function drawScorePop(){
+  if(!(G.scorePopTimer>0) || !(G.scorePopVal>=1) || !G.player || G.player.dead) return;
+  const a=Math.min(1,G.scorePopTimer/0.9);
+  const bx=G.player.x, by=pY(G.player.y)-ENTITY_H-G.player.r-26-(1-a)*12;
+  const sz=24+Math.min(16,G.scorePopVal*0.5);
+  ctx.save(); ctx.globalAlpha=a; ctx.textAlign="center";
+  ctx.font="900 "+sz+"px Segoe UI"; ctx.fillStyle="#ffd33d"; ctx.shadowColor="#ffd33d"; ctx.shadowBlur=18;
+  ctx.fillText("+"+Math.round(G.scorePopVal), bx, by);
+  ctx.restore();
+}
+
 // Online-only effects updater (particles/floats/shake) since update() doesn't run online.
 function tickEffects(dt){
   for(const pt of G.particles){ pt.x+=pt.dx; pt.y+=pt.dy; pt.dx*=0.94; pt.dy*=0.94; pt.life-=dt*1.8; }
@@ -1223,13 +1247,32 @@ function quitToMenu(){
   else { G=null; show("menuScreen"); renderMenu(); }
 }
 
+let listPoll=null;
 function openOnline(){
   initAudio();
   show("onlineScreen");
   document.getElementById("playerNameInput").value=playerName();
   document.getElementById("serverUrl").value=localStorage.getItem("rr_server")||DEFAULT_SERVER||getServerUrl();
-  netStatus(DEFAULT_SERVER?"":"Tip: paste your Railway server URL once — it's saved.");
+  document.getElementById("gamesList").innerHTML='<div class="small-muted">Connecting…</div>';
+  connect(()=>{ refreshList(); startListPoll(); });   // connect just to browse open games
 }
+function startListPoll(){ stopListPoll(); listPoll=setInterval(refreshList,2500); }
+function stopListPoll(){ if(listPoll){ clearInterval(listPoll); listPoll=null; } }
+function refreshList(){ send({t:"list"}); }
+function renderGamesList(rooms){
+  const el=document.getElementById("gamesList");
+  const open=rooms.filter(r=>!r.inGame && r.count<r.max);
+  el.innerHTML = open.length ? open.map(r=>
+    `<div class="lrow" style="padding:8px 10px;background:var(--panel2);border-radius:10px;margin-bottom:8px;">
+       <span class="nm">🎮 ${r.title} <span class="small-muted">(${r.count}/${r.max})</span></span>
+       <button class="btn small" onclick="joinGame('${r.code}')">JOIN</button></div>`).join("")
+    : '<div class="small-muted">No open games yet — create one!</div>';
+  const busy=rooms.filter(r=>r.inGame);
+  if(busy.length) el.innerHTML+=busy.map(r=>
+    `<div class="lrow" style="padding:8px 10px;opacity:.45;"><span class="nm">⏳ ${r.title}</span><span class="small-muted">in progress</span></div>`).join("");
+}
+function joinGame(code){ connect(()=>send({t:"join", code, name:playerName(), color:myColor(), stats:myStats()})); }
+function closeOnline(){ stopListPoll(); if(ws&&!room){ ws.close(); ws=null; } online=false; show("menuScreen"); renderMenu(); }
 function connect(then){
   const name=document.getElementById("playerNameInput").value.trim()||playerName();
   localStorage.setItem("rr_name",name.slice(0,14));
@@ -1246,11 +1289,6 @@ function connect(then){
   ws.onerror=()=>netStatus("Could not connect — check the URL/server.");
 }
 function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:myColor(), stats:myStats()})); }
-function joinRoom(){
-  const code=document.getElementById("joinCode").value.trim().toUpperCase();
-  if(code.length<4){ netStatus("Enter the 4-letter code."); return; }
-  connect(()=>send({t:"join", code, name:playerName(), color:myColor(), stats:myStats()}));
-}
 function leaveRoom(){ stopNetInput(); send({t:"leave"}); if(ws) ws.close(); online=false; room=null; show("menuScreen"); renderMenu(); }
 function toggleBots(){ send({t:"setbots", fill:!room.fillBots}); }
 function startOnline(){ send({t:"start"}); }
@@ -1259,7 +1297,9 @@ function backToLobby(){ show("roomScreen"); renderRoom(); }
 
 function handleMsg(m){
   if(m.t==="error"){ netStatus(m.msg); return; }
+  if(m.t==="rooms"){ renderGamesList(m.rooms); return; }
   if(m.t==="created"||m.t==="joined"){
+    stopListPoll();
     myId=m.youId; room={code:m.code, players:m.players, fillBots:m.fillBots};
     isHost=(m.players.find(p=>p.id===myId)||{}).host; online=true; show("roomScreen"); renderRoom();
   }
@@ -1274,7 +1314,8 @@ function handleMsg(m){
 }
 
 function renderRoom(){
-  document.getElementById("roomCode").textContent=room.code;
+  const host=room.players.find(p=>p.host);
+  document.getElementById("roomCode").textContent=(host?host.name:"")+"'s Game";
   document.getElementById("roomPlayers").innerHTML=room.players.map(p=>
     `<div class="lrow"><span class="nm"><span class="dot" style="background:${p.color}"></span>${p.name}${p.id===myId?" (you)":""}${p.host?" 👑":""}</span></div>`).join("");
   const myC=(room.players.find(p=>p.id===myId)||{}).color;
@@ -1299,6 +1340,7 @@ function setupOnlineGame(m){
       zone:{x:cx,y:cy,r:90}, obstacles:m.obstacles.map(o=>({x:cx+o.x,y:cy+o.y,r:o.r})),
       entities:[], projectiles:[], particles:[], floats:[], powerups:[], coinsEarned:0, player:null };
   prevEntById={}; playerTrail=[];
+  G.scorePopVal=0; G.scorePopTimer=0; G._lastScore=0;
   document.getElementById("specBanner").style.display="none";
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[m.mode].label+" · ONLINE";
   show("gameScreen"); startNetInput();
