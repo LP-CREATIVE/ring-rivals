@@ -356,6 +356,7 @@ wss.on("connection", (ws) => {
     if (!room) return;
 
     if (m.t === "setbots" && d.id === room.hostId) { room.fillBots = !!m.fill; sendLobby(room); }
+    else if (m.t === "setcolor" && !room.game) { const p = room.players.get(d.id); if (p && typeof m.color === "string") { p.color = m.color.slice(0, 9); sendLobby(room); } }
     else if ((m.t === "start" || m.t === "rematch") && d.id === room.hostId && !room.game) { startGame(room); }
     else if (m.t === "input" && room.game) {
       const p = room.players.get(d.id);

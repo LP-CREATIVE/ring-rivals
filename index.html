@@ -216,6 +216,7 @@ body{
     <div class="small-muted">Room code — share with friends</div>
     <div id="roomCode"></div>
     <div id="roomPlayers" style="text-align:left;margin-bottom:16px;"></div>
+    <div id="colorPicker" style="margin-bottom:16px;"></div>
     <div id="hostControls"></div>
     <div id="waitMsg" class="small-muted"></div>
   </div>
@@ -240,6 +241,12 @@ body{
           <div class="bar"><div id="hudHp" style="background:linear-gradient(90deg,#27e08a,#9cff6e);width:100%;"></div></div></div>
         <div class="bar-wrap"><div class="bar-label">Dash</div>
           <div class="bar" style="width:120px;"><div id="hudDash" style="background:linear-gradient(90deg,#00e5ff,#7c5cff);width:100%;"></div></div></div>
+      </div>
+      <button id="leaveGameBtn" class="btn small secondary" style="position:absolute;bottom:18px;left:18px;pointer-events:auto;" onclick="quitToMenu()">⏏ Leave</button>
+      <div id="specBanner" style="position:absolute;top:40%;left:50%;transform:translateX(-50%);text-align:center;display:none;">
+        <div style="font-size:32px;font-weight:900;color:var(--bad);text-shadow:0 0 20px rgba(255,82,82,.5);">💀 ELIMINATED</div>
+        <div class="small-muted">Spectating — your friends are still playing</div>
+        <button class="btn small" style="margin-top:10px;pointer-events:auto;" onclick="quitToMenu()">🏠 Leave to Menu</button>
       </div>
     </div>
   </div>
@@ -946,6 +953,8 @@ function update(dt){
   G.particles=G.particles.filter(p=>p.life>0);
   for(const f of G.floats){ f.y+=f.dy; f.life-=dt*1.1; }
   G.floats=G.floats.filter(f=>f.life>0);
+  // single-player: end the moment YOU run out of lives
+  if(G.player.eliminated){ endMatch(); return; }
   // last player standing wins (only when the match started with 2+ fighters)
   if(G.startCount>=2 && G.entities.filter(e=>!e.eliminated).length<=1){ endMatch(); return; }
   G.shake*=0.85;
@@ -1194,6 +1203,16 @@ function playerName(){
   return n;
 }
 function myStats(){ return { speed:statVal("speed"), maxHp:statVal("health"), dashCd:statVal("dash"), knock:statVal("knockback"), zoneMult:statVal("zoneMult") }; }
+// Lobby color palette (purely cosmetic for the match).
+const PALETTE=["#00e5ff","#2196ff","#ffd33d","#ff2d55","#9b4dff","#27e08a","#ffa726","#ff7a18","#26c6da","#ffffff"];
+function myColor(){ return localStorage.getItem("rr_color")||equippedCos("character").value; }
+function setColor(c){ localStorage.setItem("rr_color",c); send({t:"setcolor", color:c}); }
+// Always-available exit so you're never trapped on the game screen.
+function quitToMenu(){
+  document.getElementById("specBanner").style.display="none";
+  if(online){ leaveRoom(); }
+  else { G=null; show("menuScreen"); renderMenu(); }
+}
 
 function openOnline(){
   initAudio();
@@ -1217,11 +1236,11 @@ function connect(then){
   ws.onclose=()=>{ netStatus("Disconnected."); online=false; inMatch=false; };
   ws.onerror=()=>netStatus("Could not connect — check the URL/server.");
 }
-function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:equippedCos("character").value, stats:myStats()})); }
+function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:myColor(), stats:myStats()})); }
 function joinRoom(){
   const code=document.getElementById("joinCode").value.trim().toUpperCase();
   if(code.length<4){ netStatus("Enter the 4-letter code."); return; }
-  connect(()=>send({t:"join", code, name:playerName(), color:equippedCos("character").value, stats:myStats()}));
+  connect(()=>send({t:"join", code, name:playerName(), color:myColor(), stats:myStats()}));
 }
 function leaveRoom(){ stopNetInput(); send({t:"leave"}); if(ws) ws.close(); online=false; room=null; show("menuScreen"); renderMenu(); }
 function toggleBots(){ send({t:"setbots", fill:!room.fillBots}); }
@@ -1249,6 +1268,10 @@ function renderRoom(){
   document.getElementById("roomCode").textContent=room.code;
   document.getElementById("roomPlayers").innerHTML=room.players.map(p=>
     `<div class="lrow"><span class="nm"><span class="dot" style="background:${p.color}"></span>${p.name}${p.id===myId?" (you)":""}${p.host?" 👑":""}</span></div>`).join("");
+  const myC=(room.players.find(p=>p.id===myId)||{}).color;
+  document.getElementById("colorPicker").innerHTML=
+    '<div class="small-muted" style="margin-bottom:6px;">Your color — tap to change</div>'+
+    PALETTE.map(c=>`<span onclick="setColor('${c}')" style="display:inline-block;width:30px;height:30px;border-radius:8px;margin:3px;cursor:pointer;background:${c};border:3px solid ${c===myC?"#fff":"transparent"};"></span>`).join("");
   const hc=document.getElementById("hostControls"), wm=document.getElementById("waitMsg");
   if(isHost){
     hc.innerHTML=`<div class="set-row" style="border:none;justify-content:center;gap:14px;">
@@ -1266,6 +1289,7 @@ function setupOnlineGame(m){
       zone:{x:cx,y:cy,r:90}, obstacles:m.obstacles.map(o=>({x:cx+o.x,y:cy+o.y,r:o.r})),
       entities:[], projectiles:[], particles:[], floats:[], powerups:[], coinsEarned:0, player:null };
   prevEntById={}; playerTrail=[];
+  document.getElementById("specBanner").style.display="none";
   document.getElementById("lbTitle").textContent="Leaderboard · "+ZONE_MODES[m.mode].label+" · ONLINE";
   show("gameScreen"); startNetInput();
 }
@@ -1295,11 +1319,14 @@ function onState(m){
     color:p.ownerId===myId?equippedCos("projectile").value:p.color }));
   G.powerups=m.powerups.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r, type:p.type, life:p.life }));
   if(G.player) G.coinsEarned=Math.round(G.player.kos*15*statVal("coinMult"));
+  // spectator mode: out of lives but the match keeps playing for everyone else
+  document.getElementById("specBanner").style.display=(G.player&&G.player.eliminated)?"block":"none";
   updateHUD();
 }
 
 function onEnd(m){
   stopNetInput();
+  document.getElementById("specBanner").style.display="none";
   const me=m.results.find(r=>r.id===myId);
   if(me){
     const won=me.place===1 && me.score>0;
