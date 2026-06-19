@@ -308,8 +308,8 @@ function defaultSave(){
   return {
     coins:0, xp:0, level:1, wins:0, losses:0, kos:0, coinsEarnedTotal:0, rankPoints:0,
     upgrades:{ speed:0, health:0, dash:0, knockback:0, coinMult:0, zoneMult:0 },
-    ownedCosmetics:["char_default","hat_none"],
-    equipped:{ character:"char_default", hat:"hat_none", trail:"trail_none", projectile:"proj_default", arena:"arena_default" },
+    ownedCosmetics:["char_default","hat_none","back_none"],
+    equipped:{ character:"char_default", hat:"hat_none", back:"back_none", trail:"trail_none", projectile:"proj_default", arena:"arena_default" },
     achievements:{},
     settings:{ sound:true, shake:true, particles:true, bots:4 },
     lastDaily:0,
@@ -364,6 +364,13 @@ const COSMETICS = [
   {id:"hat_tophat", type:"hat", name:"Top Hat",    price:420, value:"tophat"},
   {id:"hat_halo",   type:"hat", name:"Halo",       price:550, value:"halo"},
   {id:"hat_crown",  type:"hat", name:"Crown",      price:700, value:"crown"},
+  // back accessories (capes, packs, wings — synced to all players)
+  {id:"back_none",  type:"back", name:"Nothing",     price:0,   value:"none"},
+  {id:"back_cape",  type:"back", name:"Cape",        price:220, value:"cape"},
+  {id:"back_pack",  type:"back", name:"Backpack",    price:240, value:"pack"},
+  {id:"back_jet",   type:"back", name:"Jetpack",     price:480, value:"jet"},
+  {id:"back_bat",   type:"back", name:"Bat Wings",   price:520, value:"bat"},
+  {id:"back_wings", type:"back", name:"Angel Wings", price:650, value:"wings"},
   {id:"trail_none",   type:"trail", name:"No Trail",   price:0,   value:null},
   {id:"trail_cyber",  type:"trail", name:"Cyber Trail",price:200, value:"#00e5ff"},
   {id:"trail_fire",   type:"trail", name:"Fire Trail", price:350, value:"#ff7a18"},
@@ -378,6 +385,7 @@ const COSMETICS = [
 function getCosmetic(id){ return COSMETICS.find(c=>c.id===id); }
 function equippedCos(type){ return getCosmetic(save.equipped[type]); }
 const HAT_EMOJI = {none:"—", cap:"🧢", beanie:"🧶", band:"🎗️", horns:"😈", tophat:"🎩", halo:"😇", crown:"👑"};
+const BACK_EMOJI = {none:"—", cape:"🦸", pack:"🎒", jet:"🚀", bat:"🦇", wings:"👼"};
 
 const RANKS = [
   {name:"Bronze",color:"#cd7f32",min:0},{name:"Silver",color:"#c0c0c0",min:300},
@@ -478,7 +486,7 @@ let cosTab="character";
 function renderCosmetics(){
   setCoinTags();
   const tabs=document.getElementById("cosTabs"); tabs.innerHTML="";
-  const labels={character:"Characters",hat:"Hats",trail:"Trails",projectile:"Projectiles",arena:"Arenas"};
+  const labels={character:"Characters",hat:"Hats",back:"Back",trail:"Trails",projectile:"Projectiles",arena:"Arenas"};
   for(const t in labels){
     const el=document.createElement("div"); el.className="tab"+(t===cosTab?" active":"");
     el.textContent=labels[t]; el.onclick=()=>{cosTab=t;renderCosmetics();}; tabs.appendChild(el);
@@ -491,6 +499,7 @@ function renderCosmetics(){
     if(c.type==="arena") preview=`<div class="swatch" style="background:${arenaPreview(c.value)}"></div>`;
     else if(c.type==="trail") preview=`<div class="swatch" style="background:${c.value?`linear-gradient(90deg,transparent,${c.value})`:"#0c1120"}"></div>`;
     else if(c.type==="hat") preview=`<div class="swatch" style="display:flex;align-items:center;justify-content:center;font-size:28px;background:#0c1120">${HAT_EMOJI[c.value]||"🎩"}</div>`;
+    else if(c.type==="back") preview=`<div class="swatch" style="display:flex;align-items:center;justify-content:center;font-size:28px;background:#0c1120">${BACK_EMOJI[c.value]||"🦸"}</div>`;
     else preview=`<div class="swatch" style="background:radial-gradient(circle at 40% 40%,${c.value},#0c1120)"></div>`;
     let btn;
     if(equipped) btn=`<button class="btn small secondary" disabled>EQUIPPED</button>`;
@@ -630,6 +639,7 @@ canvas.addEventListener("touchcancel",endTouch,{passive:false});
 const BOT_NAMES=["Bolt","Hex","Nova","Tank","Viper"];
 const BOT_COLORS=["#ff5252","#27e08a","#ffa726","#b388ff","#26c6da"];
 const BOT_HATS=["cap","band","horns","beanie","none"];
+const BOT_BACKS=["cape","pack","none","wings","none"];
 const MATCH_TIME=120, SCORE_TO_WIN=150, ZONE_PER_SEC=8, PROJ_DMG=12, ARENA_R=440, LIVES=3;
 
 // ---- fake-3D top-down projection (vertical foreshorten) ----
@@ -660,7 +670,7 @@ class Entity{
     this.color=color;this.name=name;this.isPlayer=!!isPlayer;
     this.diff=1;                          // bot difficulty multiplier (1 for player)
     this.maxHp=isPlayer?statVal("health"):100; this.hp=this.maxHp;
-    this.score=0;this.kos=0;this.dead=false;this.respawn=0;this.lives=LIVES;this.eliminated=false;this.hat="none";
+    this.score=0;this.kos=0;this.dead=false;this.respawn=0;this.lives=LIVES;this.eliminated=false;this.hat="none";this.back="none";
     this.angle=0;this.dashTimer=0;this.shootTimer=0;
     this.dashV=0;this.dashDx=0;this.dashDy=0;
     this.trail=[]; this.aiState={dashCd:Math.random()*2};
@@ -833,13 +843,13 @@ function startMatch(){
   _cdPrev=-1; document.getElementById("countdown").style.display="none";
 
   const player=new Entity(cx, cy+150, equippedCos("character").value, "You", true);
-  player.hat=equippedCos("hat").value;
+  player.hat=equippedCos("hat").value; player.back=equippedCos("back").value;
   G.entities.push(player); G.player=player;
   const n=save.settings.bots;
   for(let i=0;i<n;i++){
     const a=(i/n)*Math.PI*2;
     const b=new Entity(cx+Math.cos(a)*200, cy+Math.sin(a)*200, BOT_COLORS[i%5], BOT_NAMES[i%5]);
-    b.diff=G.diff; b.maxHp=100; b.hp=100; b.hat=BOT_HATS[i%BOT_HATS.length];
+    b.diff=G.diff; b.maxHp=100; b.hp=100; b.hat=BOT_HATS[i%BOT_HATS.length]; b.back=BOT_BACKS[i%BOT_BACKS.length];
     G.entities.push(b);
   }
   G.startCount=G.entities.length;
@@ -950,7 +960,7 @@ function update(dt){
       if(e.score>=SCORE_TO_WIN){ endMatch(); return; }
     } else e.holdStreak=0;
 
-    e.trail.push({x:e.x,y:e.y}); if(e.trail.length>12) e.trail.shift();
+    e.trail.push({x:e.x,y:e.y}); if(e.trail.length>28) e.trail.shift();
   }
   G.powerups=G.powerups.filter(p=>!p.dead);
 
@@ -1203,6 +1213,54 @@ function drawHat(hat,gx,hy,hr,fx,fy,pxv,pyv){
   }
   ctx.restore();
 }
+// Back accessories drawn BEHIND the character (capes, wings, packs, jetpack).
+function drawBack(back,gx,gy,bodyCY,r,fx,fy,phase,color){
+  if(!back||back==="none") return;
+  const shoulderY=bodyCY-r*0.55;
+  if(back==="cape"){
+    const hemY=gy+r*0.15, sway=Math.sin(phase)*r*0.28;
+    ctx.fillStyle=shade(color,-0.12);
+    ctx.beginPath();
+    ctx.moveTo(gx-r*0.55,shoulderY); ctx.lineTo(gx+r*0.55,shoulderY);
+    ctx.quadraticCurveTo(gx+r*0.72+sway,(shoulderY+hemY)/2,gx+r*0.5+sway,hemY);
+    ctx.quadraticCurveTo(gx+sway*0.5,hemY+r*0.18,gx-r*0.5+sway,hemY);
+    ctx.quadraticCurveTo(gx-r*0.72+sway,(shoulderY+hemY)/2,gx-r*0.55,shoulderY);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle=shade(color,0.12); roundRectPath(gx-r*0.5,shoulderY-r*0.12,r*1.0,r*0.22,r*0.1); ctx.fill();
+  } else if(back==="pack"){
+    ctx.fillStyle="#6b4f2a"; roundRectPath(gx-r*0.92,bodyCY-r*0.7,r*1.84,r*1.25,r*0.28); ctx.fill();
+    ctx.fillStyle=shade("#6b4f2a",-0.2); roundRectPath(gx-r*0.45,bodyCY-r*0.1,r*0.9,r*0.62,r*0.12); ctx.fill();
+  } else if(back==="jet"){
+    ctx.fillStyle="#444b59";
+    for(const s of [-1,1]){ roundRectPath(gx+s*r*0.62-r*0.2,bodyCY-r*0.55,r*0.4,r*1.2,r*0.14); ctx.fill(); }
+    const fl=r*(0.3+0.25*Math.abs(Math.sin(phase*3)));
+    ctx.fillStyle="#ff8a18";
+    for(const s of [-1,1]){ ctx.beginPath(); ctx.moveTo(gx+s*r*0.62-r*0.12,bodyCY+r*0.62); ctx.lineTo(gx+s*r*0.62+r*0.12,bodyCY+r*0.62); ctx.lineTo(gx+s*r*0.62,bodyCY+r*0.62+fl); ctx.closePath(); ctx.fill(); }
+  } else if(back==="wings"){
+    ctx.fillStyle="#f3f6ff";
+    for(const s of [-1,1]){ ctx.beginPath();
+      ctx.moveTo(gx+s*r*0.4,bodyCY-r*0.4);
+      ctx.quadraticCurveTo(gx+s*r*1.6,bodyCY-r*1.0,gx+s*r*1.35,bodyCY+r*0.3);
+      ctx.quadraticCurveTo(gx+s*r*1.0,bodyCY+r*0.05,gx+s*r*0.5,bodyCY+r*0.25);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle="#cdd6ee"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(gx+s*r*0.6,bodyCY-r*0.1); ctx.lineTo(gx+s*r*1.2,bodyCY-r*0.2); ctx.stroke(); }
+  } else if(back==="bat"){
+    ctx.fillStyle="#2b2540";
+    for(const s of [-1,1]){ ctx.beginPath();
+      ctx.moveTo(gx+s*r*0.35,bodyCY-r*0.45); ctx.lineTo(gx+s*r*1.5,bodyCY-r*0.8);
+      ctx.lineTo(gx+s*r*1.3,bodyCY-r*0.15); ctx.lineTo(gx+s*r*1.45,bodyCY+r*0.3);
+      ctx.lineTo(gx+s*r*1.05,bodyCY+r*0.05); ctx.lineTo(gx+s*r*1.15,bodyCY+r*0.5);
+      ctx.lineTo(gx+s*r*0.5,bodyCY+r*0.2); ctx.closePath(); ctx.fill(); }
+  }
+}
+function drawBackStraps(back,gx,bodyCY,r){   // straps over the chest (drawn in front of torso)
+  if(back==="pack"||back==="jet"){
+    ctx.strokeStyle="#3a3f4c"; ctx.lineWidth=r*0.14;
+    ctx.beginPath(); ctx.moveTo(gx-r*0.36,bodyCY-r*0.5); ctx.lineTo(gx-r*0.3,bodyCY+r*0.45); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(gx+r*0.36,bodyCY-r*0.5); ctx.lineTo(gx+r*0.3,bodyCY+r*0.45); ctx.stroke();
+  }
+}
 // Draw a little 2.5D character: legs, body, head+face, arm holding a gun, facing aim.
 function drawEntity(e){
   const r=e.r, gx=e.x, gy=pY(e.y), a=e.angle;
@@ -1231,6 +1289,9 @@ function drawEntity(e){
 
   ctx.save(); ctx.lineCap="round"; ctx.lineJoin="round";
 
+  // back accessory (behind the body)
+  drawBack(e.back,gx,gy,bodyCY,r,fx,fy,ws.phase,e.color);
+
   // legs side-by-side, alternating walk step
   ctx.strokeStyle=shade(e.color,-0.5); ctx.lineWidth=r*0.32;
   ctx.beginPath(); ctx.moveTo(gx-r*0.28,hipY); ctx.lineTo(gx-r*0.28,gy-lift1); ctx.stroke();
@@ -1248,6 +1309,7 @@ function drawEntity(e){
   ctx.shadowColor=e.color; ctx.shadowBlur=e.isPlayer?16:8;
   drawTorso(gx,bodyCY,r*0.8,bodyH,e.color);
   ctx.shadowBlur=0;
+  drawBackStraps(e.back,gx,bodyCY,r);
 
   if(!gunBehind) drawArmsGun(e,gx,bodyCY,fx,fy,pxv,pyv,handX,handY,r);
 
@@ -1412,7 +1474,7 @@ function renderGamesList(rooms){
   if(busy.length) el.innerHTML+=busy.map(r=>
     `<div class="lrow" style="padding:8px 10px;opacity:.45;"><span class="nm">⏳ ${r.title}</span><span class="small-muted">in progress</span></div>`).join("");
 }
-function joinGame(code){ connect(()=>send({t:"join", code, name:playerName(), color:myColor(), hat:equippedCos("hat").value, stats:myStats()})); }
+function joinGame(code){ connect(()=>send({t:"join", code, name:playerName(), color:myColor(), hat:equippedCos("hat").value, back:equippedCos("back").value, stats:myStats()})); }
 function closeOnline(){ stopListPoll(); if(ws&&!room){ ws.close(); ws=null; } online=false; show("menuScreen"); renderMenu(); }
 function connect(then){
   const name=document.getElementById("playerNameInput").value.trim()||playerName();
@@ -1429,7 +1491,7 @@ function connect(then){
   ws.onclose=()=>{ netStatus("Disconnected."); online=false; inMatch=false; };
   ws.onerror=()=>netStatus("Could not connect — check the URL/server.");
 }
-function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:myColor(), hat:equippedCos("hat").value, stats:myStats()})); }
+function createRoom(){ connect(()=>send({t:"create", name:playerName(), color:myColor(), hat:equippedCos("hat").value, back:equippedCos("back").value, stats:myStats()})); }
 function leaveRoom(){ stopNetInput(); send({t:"leave"}); if(ws) ws.close(); online=false; room=null; show("menuScreen"); renderMenu(); }
 function toggleBots(){ send({t:"setbots", fill:!room.fillBots}); }
 function startOnline(){ send({t:"start"}); }
@@ -1503,11 +1565,11 @@ function onState(m){
     prevEntById[e.id]=e;
   }
   // build render entities
-  G.entities=m.entities.map(e=>({ id:e.id, name:e.name, color:e.color, hat:e.hat, isPlayer:e.id===myId,
+  G.entities=m.entities.map(e=>({ id:e.id, name:e.name, color:e.color, hat:e.hat, back:e.back, isPlayer:e.id===myId,
     x:cx+e.x, y:cy+e.y, r:e.r, angle:e.angle, hp:e.hp, maxHp:e.maxHp, dead:e.dead,
     score:e.score, kos:e.kos, lives:e.lives, eliminated:e.eliminated, buffs:e.buffs, dashTimer:e.dashTimer, dashCd:e.dashCd, trail:[] }));
   G.player=G.entities.find(e=>e.isPlayer)||null;
-  if(G.player&&!G.player.dead){ playerTrail.push({x:G.player.x,y:G.player.y}); if(playerTrail.length>12) playerTrail.shift(); G.player.trail=playerTrail; }
+  if(G.player&&!G.player.dead){ playerTrail.push({x:G.player.x,y:G.player.y}); if(playerTrail.length>28) playerTrail.shift(); G.player.trail=playerTrail; }
   else playerTrail=[];
   G.projectiles=m.projectiles.map(p=>({ x:cx+p.x, y:cy+p.y, r:p.r,
     color:p.ownerId===myId?equippedCos("projectile").value:p.color }));
@@ -1612,6 +1674,7 @@ function sendInput(){
 // make sure free cosmetics are owned and the hat slot is valid (migrates old saves)
 COSMETICS.filter(c=>c.price===0).forEach(c=>{ if(!save.ownedCosmetics.includes(c.id)) save.ownedCosmetics.push(c.id); });
 if(!save.equipped.hat) save.equipped.hat="hat_none";
+if(!save.equipped.back) save.equipped.back="back_none";
 refreshSettingsUI(); renderMenu(); saveSave();
 </script>
 </body>

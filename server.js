@@ -36,6 +36,7 @@ const BOT_DIFF = 1.1;
 const BOT_NAMES = ["Bolt", "Hex", "Nova", "Tank", "Viper"];
 const BOT_COLORS = ["#ff5252", "#27e08a", "#ffa726", "#b388ff", "#26c6da"];
 const BOT_HATS = ["cap", "band", "horns", "beanie", "none"];   // bots get varied headgear
+const BOT_BACKS = ["cape", "pack", "none", "wings", "none"];
 const ZONE_MODE_KEYS = ["classic", "koth", "shrink"];
 const POWERUP_TYPES = ["health", "speed", "rapid"];
 
@@ -75,7 +76,7 @@ function makeEntity(opts) {
   return {
     id: opts.id, name: opts.name, color: opts.color, isBot: !!opts.isBot,
     stats: opts.stats || null,
-    hat: opts.hat || "none",
+    hat: opts.hat || "none", back: opts.back || "none",
     x: opts.x, y: opts.y, vx: 0, vy: 0, r: 18, angle: 0,
     maxHp: opts.maxHp || 100, hp: opts.maxHp || 100,
     score: 0, kos: 0, dead: false, respawn: 0, lives: LIVES, eliminated: false,
@@ -119,7 +120,7 @@ function startGame(room) {
   for (const p of room.players.values()) {
     const a = (i / TOTAL_SLOTS) * Math.PI * 2;
     g.entities.push(makeEntity({
-      id: p.id, name: p.name, color: p.color, stats: p.stats, hat: p.hat,
+      id: p.id, name: p.name, color: p.color, stats: p.stats, hat: p.hat, back: p.back,
       maxHp: p.stats ? p.stats.maxHp : 100, dashCd: p.stats ? p.stats.dashCd : 2.5,
       x: Math.cos(a) * 200, y: Math.sin(a) * 200,
     }));
@@ -132,7 +133,7 @@ function startGame(room) {
       const a = (i / TOTAL_SLOTS) * Math.PI * 2;
       g.entities.push(makeEntity({
         id: "bot" + b, name: BOT_NAMES[b % 5], color: BOT_COLORS[b % 5], isBot: true,
-        hat: BOT_HATS[b % BOT_HATS.length],
+        hat: BOT_HATS[b % BOT_HATS.length], back: BOT_BACKS[b % BOT_BACKS.length],
         x: Math.cos(a) * 200, y: Math.sin(a) * 200,
       }));
     }
@@ -310,7 +311,7 @@ function broadcastState(room, countdown) {
   broadcast(room, {
     t: "state", time: g.time, mode: g.mode, over: false, countdown: Math.ceil(countdown || 0),
     zone: { x: g.zone.x, y: g.zone.y, r: g.zone.r },
-    entities: g.entities.map(e => ({ id: e.id, name: e.name, color: e.color, hat: e.hat, x: e.x, y: e.y, r: e.r, angle: e.angle, hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, lives: e.lives, eliminated: e.eliminated, buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd })),
+    entities: g.entities.map(e => ({ id: e.id, name: e.name, color: e.color, hat: e.hat, back: e.back, x: e.x, y: e.y, r: e.r, angle: e.angle, hp: e.hp, maxHp: e.maxHp, dead: e.dead, score: e.score, kos: e.kos, isBot: e.isBot, lives: e.lives, eliminated: e.eliminated, buffs: { speed: e.buffs.speed, rapid: e.buffs.rapid }, dashTimer: e.dashTimer, dashCd: e.dashCd })),
     projectiles: g.projectiles.map(p => ({ x: p.x, y: p.y, r: p.r, ownerId: p.ownerId, color: p.color })),
     powerups: g.powerups.map(p => ({ x: p.x, y: p.y, r: p.r, type: p.type, life: p.life })),
   });
@@ -349,7 +350,7 @@ wss.on("connection", (ws) => {
       const code = makeCode();
       const id = "p" + (idCounter++);
       const room = { code, hostId: id, fillBots: true, players: new Map(), game: null, loop: null };
-      room.players.set(id, { id, name: (m.name || "Host").slice(0, 14), color: m.color || "#00e5ff", hat: m.hat || "none", stats: m.stats || null, ws });
+      room.players.set(id, { id, name: (m.name || "Host").slice(0, 14), color: m.color || "#00e5ff", hat: m.hat || "none", back: m.back || "none", stats: m.stats || null, ws });
       rooms.set(code, room);
       d.id = id; d.room = room;
       send(ws, { t: "created", code, youId: id, players: playerList(room), fillBots: room.fillBots });
@@ -362,7 +363,7 @@ wss.on("connection", (ws) => {
       if (room.game) { send(ws, { t: "error", msg: "Match already in progress" }); return; }
       if (room.players.size >= TOTAL_SLOTS) { send(ws, { t: "error", msg: "Room is full" }); return; }
       const id = "p" + (idCounter++);
-      room.players.set(id, { id, name: (m.name || "Player").slice(0, 14), color: m.color || "#27e08a", hat: m.hat || "none", stats: m.stats || null, ws });
+      room.players.set(id, { id, name: (m.name || "Player").slice(0, 14), color: m.color || "#27e08a", hat: m.hat || "none", back: m.back || "none", stats: m.stats || null, ws });
       d.id = id; d.room = room;
       send(ws, { t: "joined", code: room.code, youId: id, players: playerList(room), fillBots: room.fillBots });
       sendLobby(room);
